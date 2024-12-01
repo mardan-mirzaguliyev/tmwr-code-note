@@ -1,0 +1,811 @@
+---
+title: "Model Tuning and the Dangers of Overfitting"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/10/26
+---
+
+# Model Tuning and the Dangers of Overfitting
+
+-   In order to use a model for prediction, the parameters for that model must be estimated.
+
+-   Some of these parameters can be estimated directly from the training data, but other parameters, called *tuning parameters* or *hyperparameters*, must be specified ahead of time and can’t be directly found from training data.
+
+-   These are unknown structural or other kind of values that have significant impact on the model but cannot be directly estimated from the data.
+
+```{r}
+#| label: load necessary packages
+
+# knitr::opts_chunk$set(fig.path = "figures/")
+library(tidymodels)
+library(patchwork)
+library(ggplot2)
+library(ggforce)
+library(doMC)
+
+registerDoMC(cores = parallel::detectCores())
+theme_set(theme_bw())
+
+tidymodels_prefer()
+```
+
+```{r}
+#| label: data splits for this chapter
+
+data(two_class_dat)
+
+set.seed(91)
+split <- initial_split(two_class_dat)
+
+training_set <- training(split)
+testing_set <- testing(split)
+
+data_grid <- crossing(A = seq(0.4, 4, length = 200), 
+                      B = seq(.14, 3.9, length = 200))
+```
+
+## 12.1 MODEL PARAMETERS
+
+In ordinary linear regression, there are two parameters $β_0$ and $β_1$of the model:
+
+$$y_i = β_0 + β_1x_i + ϵ_i$$
+
+When we have the outcome ($y$) and predictor ($x$) data, we can estimate the two parameters $β_0$ and $β_1$:
+
+$$\hat \beta_1 = \frac{\sum_i (y_i-\bar{y})(x_i-\bar{x})}{\sum_i(x_i-\bar{x})^2}$$
+
+and
+
+$$\hat \beta_0 = \bar{y}-\hat \beta_1 \bar{x}.$$
+
+-   We can directly estimate these values from the data for this example model because they are analytically tractable; if we have the data, then we can estimate these model parameters.
+
+-   There are many situations where a model has parameters that *can’t* be directly estimated from the data.
+
+-   or the KNN model, the prediction equation for a new value $x_0$ is
+
+    $$
+    \hat y = \frac{1}{K}\sum_{\ell = 1}^K x_\ell^*
+    $$
+
+-   where $K$ is the number of neighbors and the $x_\ell^*$ are the $K$ closest values to $x_0$ in the training set.
+
+-   The model itself is not defined by a model equation; the previous prediction equation instead defines it.
+
+-   This characteristic, along with the possible intractability of the distance measure, makes it impossible to create a set of equations that can be solved for $K$ (iteratively or otherwise).
+
+-   The number of neighbors has a profound impact on the model; it governs the flexibility of the class boundary.
+
+-   For small values of $K$, the boundary is very elaborate while for large values, it might be quite smooth.
+
+The number of nearest neighbors is a good example of a tuning parameter or hyperparameter that cannot be directly estimated from the data.
+
+## 12.2. TUNING PARAMETERS FOR DIFFERENT TYPES OF MODELS
+
+There are many examples of tuning parameters or hyperparameters in different statistical and machine learning models:
+
+-   Boosting is an ensemble method that combines a series of base models, each of which is created sequentially and depends on the previous models. The number of boosting iterations is an important tuning parameter that usually requires optimization.
+
+-   In the classic single-layer artificial neural network (a.k.a. the multilayer perceptron), the predictors are combined using two or more hidden units. The hidden units are linear combinations of the predictors that are captured in an *activation function* (typically a nonlinear function, such as a sigmoid). The hidden units are then connected to the outcome units; one outcome unit is used for regression models, and multiple outcome units are required for classification. The number of hidden units and the type of activation function are important structural tuning parameters.
+
+-   Modern gradient descent methods are improved by finding the right optimization parameters. Examples of such hyperparameters are learning rates, momentum, and the number of optimization iterations/epochs (Goodfellow, Bengio, and Courville 2016). Neural networks and some ensemble models use gradient descent to estimate the model parameters. While the tuning parameters associated with gradient descent are not structural parameters, they often require tuning.
+
+In some cases, preprocessing techniques require tuning:
+
+-   In principal component analysis, or its supervised cousin called partial least squares, the predictors are replaced with new, artificial features that have better properties related to collinearity. The number of extracted components can be tuned.
+
+-   Imputation methods estimate missing predictor values using the complete values of one or more predictors. One effective imputation tool uses $K$ nearest neighbors of the complete columns to predict the missing value. The number of neighbors modulates the amount of averaging and can be tuned.
+
+Some classical statistical models also have structural parameters:
+
+-   In binary regression, the logit link is commonly used (i.e., logistic regression). Other link functions, such as the probit and complementary log-log, are also available (Dobson 1999). This example is described in more detail in the Section 12.3.
+
+-   Non-Bayesian longitudinal and repeated measures models require a specification for the covariance or correlation structure of the data. Options include compound symmetric (a.k.a. exchangeable), autoregressive, Toeplitz, and others (Littell, Pendergast, and Natarajan 2000).
+
+-   A counterexample where it is inappropriate to tune a parameter is the prior distribution required for Bayesian analysis.
+
+-   The prior encapsulates the analyst’s belief about the distribution of a quantity before evidence or data are taken into account. For example, in Section 11.4, we used a Bayesian ANOVA model, and we were unclear about what the prior should be for the regression parameters (beyond being a symmetric distribution). We chose a t-distribution with one degree of freedom for the prior since it has heavier tails; this reflects our added uncertainty.
+
+-   Our prior beliefs should not be subject to optimization.
+
+-   Tuning parameters are typically optimized for performance whereas priors should not be tweaked to get “the right results.”
+
+-   Another (perhaps more debatable) counterexample of a parameter that does *not* need to be tuned is the number of trees in a random forest or bagging model.
+
+-   This value should instead be chosen to be large enough to ensure numerical stability in the results; tuning it cannot improve performance as long as the value is large enough to produce reliable results.
+
+-   For random forests, this value is typically in the thousands while the number of trees needed for bagging is around 50 to 100.
+
+## 12.3 WHAT DO WE OPTIMIZE?
+
+-   How should we evaluate models when we optimize tuning parameters? It depends on the model and the purpose of the model.
+
+-   For cases where the statistical properties of the tuning parameter are tractable, common statistical properties can be used as the objective function.
+
+-   For example, in the case of binary logistic regression, the link function can be chosen by maximizing the likelihood or information criteria.
+
+-   To demonstrate, consider the classification data with two predictors, two classes, and a training set of 593 data points.
+
+```{r}
+#| label: visialize the data with two predictors
+
+ggplot(training_set, aes(x = A, y = B, color = Class, pch = Class)) +
+  geom_point(alpha = 0.7) +
+  coord_equal() +
+  labs(x = "Predictor A", y = "Predictor B", color = NULL, pch = NULL) +
+  scale_color_manual(values = c("#CC6677", "#88CCEE"))
+```
+
+-   We could start by fitting a linear class boundary to these data. The most common method for doing this is to use a generalized linear model in the form of *logistic regression*.
+
+-   This model relates the *log* *odds* of a sample being Class 1 using the *logit* transformation:
+
+$$\log\left(\frac{\pi}{1 - \pi}\right) = \beta_0 + \beta_1x_1 + \ldots + \beta_px_p$$
+
+In the context of generalized linear models, the logit function is the *link function* between the outcome ($\pi$) and the predictors. There are other link functions that include the *probit* model:
+
+$$
+\Phi^{-1}(\pi) = \beta_0 + \beta_1x_1 + \ldots + \beta_px_p
+$$
+
+where $Φ$ is the cumulative standard normal function, as well as the *complementary log-log* model:
+
+$$
+\log(-\log(1-\pi)) = \beta_0 + \beta_1x_1 + \ldots + \beta_px_p
+$$
+
+-   Each of these models results in linear class boundaries.
+
+-   Which one should we use? Since, for these data, the number of model parameters does not vary, the statistical approach is to compute the (log) likelihood for each model and determine the model with the largest value.
+
+-   Traditionally, the likelihood is computed using the same data that were used to estimate the parameters, not using approaches like data splitting or resampling from Chapters 5 and 10.
+
+-   For a data frame `training_set`, let’s create a function to compute the different models and extract the likelihood statistics for the training set (using `broom::glance()`):
+
+```{r}
+#| label: create a function to compute the different models and extract the likelihood statistics for the training set
+
+llhood <- function(...) {
+  logistic_reg() |> 
+    set_engine("glm", ...) |> 
+    fit(Class ~ ., data = training_set) |> 
+    glance() |> 
+    select(logLik)
+}
+```
+
+```{r}
+#| label: make the results tidy
+
+bind_rows(
+  llhood(),
+  llhood(family = binomial(link = "probit")),
+  llhood(family = binomial(link = "cloglog"))
+) |> 
+  mutate(link = c("logit", "probit", "c-log-log")) |> 
+  arrange(desc(logLik))
+```
+
+-   According to these results, the logistic model has the best statistical properties.
+
+-   From the scale of the log-likelihood values, it is difficult to understand if these differences are important or negligible.
+
+-   One way of improving this analysis is to resample the statistics and separate the modeling data from the data used for performance estimation.
+
+-   With this small data set, repeated 10-fold cross-validation is a good choice for resampling. In the **yardstick** package, the `mn_log_loss()` function is used to estimate the negative log-likelihood, with our results shown in Figure 12.2.
+
+```{r}
+#| label: set the seed and make resamples of the data using repeated 10-fold cross-validation
+
+set.seed(1201)
+
+rs <- vfold_cv(training_set, repeats = 10)
+```
+
+```{r}
+#| label: define a function to return the individual resampled performance estimates
+
+lloss <- function(...) {
+  perf_meas <- metric_set(roc_auc, mn_log_loss)
+  
+  
+  logistic_reg() |> 
+    set_engine("glm", ...) |> 
+    fit_resamples(Class ~ A + B, rs, metrics = perf_meas) |> 
+    collect_metrics(summarize = FALSE) |> 
+    select(id, id2, .metric, .estimate)
+}
+```
+
+```{r}
+#| label: apply the function to return the individual resampled performance estimates
+
+resampled_res <- 
+  bind_rows(
+    lloss() |> mutate(model = "logistic"),
+    lloss(family = binomial(link = "probit")) |> mutate(model = "probit"),
+    lloss(family = binomial(link = "cloglog")) |> mutate(model = "c-log-log")
+  ) |> 
+  # Convert log-loss to log-likelihood:
+  mutate(.estimate = if_else(.metric == "mn_log_loss", -.estimate, .estimate)) |> 
+  group_by(model, .metric) |> 
+  summarize(
+    mean = mean(.estimate, na.rm = TRUE),
+    std_err = sd(.estimate, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+```
+
+```{r}
+#| label: visualize the results for the resampled binomial log-likelihood with three different link functions
+
+resampled_res |> 
+  filter(.metric == "mn_log_loss") |> 
+  ggplot(aes(x = mean, y = model)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = mean - 1.64 * std_err, xmax = mean + 1.64 * std_err),
+                width = .1) +
+  labs(y = NULL, x = "log-likelihood")
+```
+
+-   The scale of these values is different than the previous values since they are computed on a smaller data set; the value produced by `broom::glance()` is a sum while `yardstick::mn_log_loss()` is an average.
+
+-   These results exhibit evidence that the choice of the link function matters somewhat.
+
+-   Although there is an overlap in the confidence intervals, the logistic model has the best results.
+
+-   What about a different metric? We also calculated the area under the ROC curve for each resample.
+
+-   These results, which reflect the discriminative ability of the models across numerous probability thresholds, show a lack of difference:
+
+```{r}
+#| label: visualize the results for the resampled Receiver operating characteristic
+
+resampled_res |> 
+  filter(.metric == "roc_auc") |> 
+  ggplot(aes(x = mean, y = model)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = mean - 1.64 * std_err, xmax = mean + 1.64 * std_err), 
+                width = .1) +
+  labs(y = NULL, x = "area under the ROC curve")
+```
+
+Given the overlap of the intervals, as well as the scale of the x-axis, any of these options could be used. We see this again when the class boundaries for the three models are overlaid on the test set of 198 data points:
+
+```{r}
+#| label: class boundaries for the logistic model test set
+
+logit_pred <- 
+  logistic_reg() |> 
+  set_engine("glm") |> 
+  fit(Class ~ A + B, data = training_set) |> 
+  predict(data_grid, type = "prob") |> 
+  bind_cols(data_grid) |> 
+  mutate(link = "logit")
+```
+
+```{r}
+#| label: class boundaries for the probit model test set
+
+probit_pred <- 
+  logistic_reg() |> 
+  set_engine("glm", family = binomial(link = "probit")) |> 
+  fit(Class ~ A + B, data = training_set) |> 
+  predict(data_grid, type = "prob") |> 
+  bind_cols(data_grid) |> 
+  mutate(link = "probit")
+```
+
+```{r}
+#| label: class boundaries for the cloglog model test set
+
+cloglog_pred <- 
+  logistic_reg() |> 
+  set_engine("glm", family = binomial(link = "cloglog")) |> 
+  fit(Class ~ A + B, data = training_set) |> 
+  predict(data_grid, type = "prob") |> 
+  bind_cols(data_grid) |> 
+  mutate(link = "c-log-log")
+```
+
+```{r}
+#| label: collect all results into final tibble
+
+link_grids <- 
+  bind_rows(logit_pred, probit_pred, cloglog_pred) |> 
+  mutate(link = factor(link, levels = c("logit", "probit", "c-log-log")))
+
+link_grids
+```
+
+```{r}
+#| label: visualize the results of linear class boundary fits for three link functions
+
+link_grids |> 
+  ggplot(aes(x = A, y = B)) +
+  geom_point(data = testing_set, aes(color = Class, pch = Class),
+             alpha = 0.7, show.legend = FALSE) +
+  geom_contour(aes(z = .pred_Class1, lty = link), breaks = 0.5, color = "black") +
+  coord_equal() +
+  labs(x = "Predictor A", y = "Predictor B") +
+  theme(legend.position = "top")
+```
+
+-   This exercise emphasizes that different metrics might lead to different decisions about the choice of tuning parameter values.
+
+-   In this case, one metric indicates the models are somewhat different while another metric shows no difference at all.
+
+## 12.4 THE CONSEQUENCES OF POOR PARAMETER ESTIMATES
+
+-   Many tuning parameters modulate the amount of model complexity. More complexity often implies more malleability in the patterns that a model can emulate.
+
+-   *Overfitting* is the situation where a model adapts too much to the training data; it performs well for the data used to build the model but poorly for new data.
+
+-   Since tuning model parameters can increase model complexity, poor choices can lead to overfitting.
+
+-   Recall the single layer neural network model described in Section 12.2.
+
+-   With a single hidden unit and sigmoidal activation functions, a neural network for classification is, for all intents and purposes, just logistic regression.
+
+-   However, as the number of hidden units increases, so does the complexity of the model.
+
+-   In fact, when the network model uses sigmoidal activation units, Cybenko (1989) showed that the model is a universal function approximator as long as there are enough hidden units.
+
+-   We fit neural network classification models to the same two-class data from the previous section, varying the number of hidden units.
+
+-   Using the area under the ROC curve as a performance metric, the effectiveness of the model on the training set increases as more hidden units are added.
+
+-   The network model thoroughly and meticulously learns the training set.
+
+-   If the model judges itself on the training set ROC value, it prefers many hidden units so that it can nearly eliminate errors.
+
+```{r}
+#| label: building the model to display the effect of the number of hidden units
+
+two_class_rec <- 
+  recipe(Class ~ ., data = two_class_dat) |> 
+  step_normalize(all_numeric_predictors())
+
+two_class_rec
+```
+
+```{r}
+#| label: multilayer perception model
+
+mlp_mod <- 
+  mlp(hidden_units = tune(), epochs = 1000) |> 
+  set_engine("nnet") |> 
+  set_mode("classification")
+
+mlp_mod
+```
+
+```{r}
+#| label: multilayer perception workflow
+
+mlp_wflow <- 
+  workflow() |> 
+  add_recipe(two_class_rec) |> 
+  add_model(mlp_mod)
+
+mlp_wflow
+```
+
+```{r}
+#| label: multilayer perception recipe
+
+mlp_res <- 
+  tibble(
+    hidden_units = 1:20,
+    train = NA_real_,
+    test = NA_real_,
+    model = vector(mode = "list", length = 20)
+  )
+
+mlp_res
+```
+
+```{r}
+#| label: populating the multilayer perception resipe
+
+for(i in 1:nrow(mlp_res)) {
+  set.seed(27)
+  
+  tmp_mod <- 
+    mlp_wflow |> 
+    finalize_workflow(mlp_res |> 
+                        slice(i) |> 
+                        select(hidden_units)) |> 
+    fit(training_set)
+  
+  mlp_res$train[i] <- 
+    roc_auc_vec(training_set$Class, 
+                predict(tmp_mod, 
+                        training_set, 
+                        type = "prob")$.pred_Class1)
+  
+  mlp_res$test[i] <- 
+    roc_auc_vec(testing_set$Class,
+                predict(tmp_mod,
+                        testing_set,
+                        type = "prob")$.pred_Class1)
+  
+  mlp_res$model[[i]] <- tmp_mod
+}
+
+mlp_res
+```
+
+```{r}
+#| label: visualize the class boundaries for three models with increasing numbers of hidden units
+
+te_plot <- 
+  mlp_res |> 
+  slice(c(1, 4, 20)) |> 
+  mutate(
+    probs = map(model, ~ bind_cols(data_grid, 
+                                   predict(.x, 
+                                           data_grid, 
+                                           type = "prob")))) |> 
+  select(hidden_units, probs) |> 
+  unnest(cols = c(probs)) |> 
+  mutate(
+    label = paste(format(hidden_units), "units"),
+    label = ifelse(label == " 1 units", " 1 unit", label)
+    ) |> 
+  ggplot(aes(x = A, y = B)) +
+  geom_point(data = testing_set, aes(color = Class, pch = Class),
+             alpha = 0.5, show.legend = TRUE) +
+  geom_contour(aes(z = .pred_Class1), breaks = 0.5, color = "black") +
+  scale_color_manual(values = c("#CC6677", "#88CCEE")) +
+  facet_wrap(~ label, nrow = 1) +
+  coord_equal() +
+  ggtitle("Test Set")
+  
+tr_plot <- 
+  mlp_res |> 
+  slice(c(1, 4, 20)) |> 
+  mutate(
+    probs = map(model, ~ bind_cols(data_grid, 
+                                   predict(.x, 
+                                           data_grid, 
+                                           type = "prob")))) |> 
+  select(hidden_units, probs) |> 
+  unnest(cols = c(probs)) |> 
+  mutate(
+    label = paste(format(hidden_units), "units"),
+    label = ifelse(label == " 1 units", " 1 unit", label)
+  ) |> 
+  ggplot(aes(x =A, y = B)) +
+  geom_point(data = training_set, aes(color = Class, pch = Class),
+             alpha = 0.5, show.legend = TRUE) +
+  geom_contour(aes(z = .pred_Class1), breaks = 0.5, color = "black") +
+  scale_color_manual(values = c("#CC6677", "#88CCEE")) +
+  facet_wrap(~ label, nrow = 1) +
+  coord_equal() +
+  ggtitle("Training Set") +
+  labs(x = "Predictor A", y = "Predictor B")
+
+tr_plot / te_plot
+```
+
+-   The single unit model does not adapt very flexibly to the data (since it is constrained to be linear).
+
+-   A model with four hidden units begins to show signs of overfitting with an unrealistic boundary for values away from the data mainstream.
+
+-   This is caused by a single data point from the first class in the upper-right corner of the data.
+
+-   By 20 hidden units, the model is beginning to memorize the training set, creating small islands around those data to minimize the resubstitution error rate.
+
+-   These patterns do not repeat in the test set.
+
+-   This last panel is the best illustration of how tuning parameters that control complexity must be modulated so that the model is effective.
+
+-   For a 20-unit model, the training set ROC AUC is 0.944 but the test set value is 0.855.
+
+-   This occurrence of overfitting is obvious with two predictors that we can plot. However, in general, we must use a quantitative approach for detecting overfitting.
+
+-   Rather than using the test set, some form of resampling is required.
+
+-   This could mean an iterative approach (e.g., 10-fold cross-validation) or a single data source (e.g., a validation set).
+
+## 12.5 TWO GENERAL STRATEGIES FOR OPTIMIZATION
+
+-   Tuning parameter optimization usually falls into one of two categories: grid search and iterative search.
+
+    -   *Grid search* is when we predefine a set of parameter values to evaluate. The main choices involved in grid search are how to make the grid and how many parameter combinations to evaluate. Grid search is often judged as inefficient since the number of grid points required to cover the parameter space can become unmanageable with the curse of dimensionality.
+
+    -   *Iterative search* or sequential search is when we sequentially discover new parameter combinations based on previous results. Almost any nonlinear optimization method is appropriate, although some are more efficient than others. In some cases, an initial set of results for one or more parameter combinations is required to start the optimization process.
+
+    -   Hybrid strategies are also an option and can work well. After an initial grid search, a sequential optimization can start from the best grid combination.
+
+## 12.6 TUNING PARAMETERS IN TIDYMODELS
+
+We’ve already dealt with quite a number of arguments that correspond to tuning parameters for recipe and model specifications in previous chapters. It is possible to tune:
+
+-   the threshold for combining neighborhoods into an “other” category (with argument name `threshold`)
+
+-   the number of degrees of freedom in a natural spline (`deg_free`)
+
+-   the number of data points required to execute a split in a tree-based model (`min_n`)
+
+-   the amount of regularization in penalized models (`penalty`)
+
+-   For **`parsnip`** model specifications, there are two kinds of parameter arguments.
+
+    -   *Main arguments* are those that are most often optimized for performance and are available in multiple engines. The main tuning parameters are top-level arguments to the model specification function. For example, the `rand_forest()` function has main arguments `trees`, `min_n`, and `mtry` since these are most frequently specified or optimized.
+
+    -   A secondary set of tuning parameters are *engine specific*. These are either infrequently optimized or are specific only to certain engines. Again using random forests as an example, the **ranger** package contains some arguments that are not used by other packages. One example is gain penalization, which regularizes the predictor selection in the tree induction process. This parameter can help modulate the trade-off between the number of predictors used in the ensemble and performance (Wundervald, Parnell, and Domijan 2020).
+
+    -   
+
+```{r}
+#| label: an example of a secondary set of tuning parameters
+
+rand_forest(trees = 2000, min_n = 10) |>            # <- main arguments
+  set_engine("ranger", regularization.factor = 0.5) # <- engine specific
+```
+
+-   The main arguments use a harmonized naming system to remove inconsistencies across engines while engine-specific arguments do not.
+
+How can we signal to tidymodels functions which arguments should be optimized? Parameters are marked for tuning by assigning them a value of `tune()`. For the single layer neural network used in Section 12.4, the number of hidden units is designated for tuning using:
+
+```{r}
+#| label: optimizing the arguments using neural network example
+
+neural_net_spec <- 
+  mlp(hidden_units = tune()) |> 
+  set_mode("regression") |> 
+  set_engine("keras")
+```
+
+The `tune()` function doesn’t execute any particular parameter value; it only returns an expression:
+
+```{r}
+#| label: returning an expression with tune
+
+tune()
+```
+
+-   Embedding this `tune()` value in an argument will tag the parameter for optimization.
+
+-   The model tuning functions shown in the next two chapters parse the model specification and/or recipe to discover the tagged parameters.
+
+-   These functions can automatically configure and process these parameters since they understand their characteristics (e.g., the range of possible values, etc.).
+
+```{r}
+#| label: enumerating the tuning parameters
+
+extract_parameter_set_dials(neural_net_spec)
+```
+
+-   The results show a value of `nparam[+]`, indicating that the number of hidden units is a numeric parameter.
+
+-   There is an optional identification argument that associates a name with the parameters.
+
+-   This can come in handy when the same kind of parameter is being tuned in different places.
+
+-   For example, with the Ames housing data from Section 10.6, the recipe encoded both longitude and latitude with spline functions.
+
+-   If we want to tune the two spline functions to potentially have different levels of smoothness, we call `step_ns()` twice, once for each predictor. To make the parameters identifiable, the identification argument can take any character string:
+
+```{r}
+#| label: using an optional identification argument
+
+ames_rec <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + 
+           Bldg_Type + Latitude + Longitude, data = ames_train) |> 
+  step_log(Gr_Live_Area, base = 10) |> 
+  step_other(Neighborhood, threshold = tune()) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type")) |> 
+  step_ns(Longitude, deg_free = tune("longitude df")) |> 
+  step_ns(Latitude, deg_free = tune("latitude df"))
+
+recipes_param <- extract_parameter_set_dials(ames_rec)
+recipes_param
+```
+
+Note that the `identifier` and `type` columns are not the same for both of the spline parameters.
+
+When a recipe and model specification are combined using a workflow, both sets of parameters are shown:
+
+```{r}
+#| label: recipe and model specification combined in a workflow
+
+wflow_param <- 
+  workflow() |> 
+  add_recipe(ames_rec) |> 
+  add_model(neural_net_spec) |> 
+  extract_parameter_set_dials()
+
+wflow_param
+```
+
+-   Neural networks are exquisitely capable of emulating nonlinear patterns.
+
+-   Adding spline terms to this type of model is unnecessary; we combined this model and recipe for illustration only.
+
+Each tuning parameter argument has a corresponding function in the **`dials`** package.
+
+In the vast majority of the cases, the function has the same name as the parameter argument:
+
+```{r}
+#| label: tuning parameter arguments and their corresponding functions
+
+hidden_units()
+
+threshold()
+```
+
+The `deg_free` parameter is a counterexample; the notion of degrees of freedom comes up in a variety of different contexts.
+
+When used with splines, there is a specialized **`dials`** function called `spline_degree()` that is, by default, invoked for splines:
+
+```{r}
+#| label: corresponding function for deg_free argument
+
+spline_degree()
+```
+
+The **`dials`** package also has a convenience function for extracting a particular parameter object:
+
+```{r}
+#| label: extracting a particular parameter object
+
+wflow_param |> extract_parameter_dials("threshold")
+```
+
+Inside the parameter set, the range of the parameters can also be updated in place:
+
+```{r}
+#| label: updating the range of the parameters
+
+extract_parameter_set_dials(ames_rec) |> 
+  update(threshold = threshold(c(0.8, 1.0)))
+```
+
+-   The *parameter sets* created by `extract_parameter_set_dials()` are consumed by the `tidymodels` tuning functions (when needed).
+
+-   If the defaults for the tuning parameter objects require modification, a modified parameter set is passed to the appropriate tuning function.
+
+-   Some tuning parameters depend on the dimensions of the data.
+
+    -   For example, the number of nearest neighbors must be between one and the number of rows in the data.
+
+-   In some cases, it is easy to have reasonable defaults for the range of possible values.
+
+-   In other cases, the parameter range is critical and cannot be assumed.
+
+-   The primary tuning parameter for random forest models is the number of predictor columns that are randomly sampled for each split in the tree, usually denoted as `mtry()`.
+
+-   Without knowing the number of predictors, this parameter range cannot be preconfigured and requires finalization.
+
+```{r}
+#| label: tuning the number of predictors in random forest model
+
+rf_spec <- 
+  rand_forest(mtry = tune()) |> 
+  set_engine("ranger", 
+             regularization.factor = tune("regularization")) |> 
+  set_mode("regression")
+
+rf_spec
+```
+
+```{r}
+#| label: extracting the parameter that needs to be finalized
+
+rf_param <- extract_parameter_set_dials(rf_spec)
+rf_param
+```
+
+-   Complete parameter objects have `[+]` in their summary;
+
+    -   a value of `[?]` indicates that at least one end of the possible range is missing.
+
+There are two methods for handling this. The first is to use `update()`, to add a range based on what you know about the data dimensions:
+
+```{r}
+#| label: finalizing the parameter object using update()
+
+rf_param |> 
+  update(mtry = mtry(c(1, 70)))
+```
+
+-   However, this approach might not work if a recipe is attached to a workflow that uses steps that either add or subtract columns.
+
+-   If those steps are not slated for tuning, the `finalize()` function can execute the recipe once to obtain the dimensions:
+
+```{r}
+#| label: selecting the square-footage predictors to finalize the parameter object using finalize()
+
+pca_rec <- 
+  recipe(Sale_Price ~ ., data = ames_train) |> 
+  # Select the square-footage predictors and extract their PCA components:
+  step_normalize(contains("SF")) |> 
+  # Select the number of components needed to capture 95% of
+  # the variance in the predictors.
+  step_pca(contains("SF"), threshold = .95)
+
+pca_rec
+```
+
+```{r}
+#| label: finalizing the parameter object using finalize()
+
+updated_param <- 
+  workflow() |> 
+  add_model(rf_spec) |> 
+  add_recipe(pca_rec) |> 
+  extract_parameter_set_dials() |> 
+  finalize(ames_train)
+
+updated_param
+```
+
+```{r}
+#| label: extract the parameter that finalized
+
+updated_param |> 
+  extract_parameter_dials("mtry")
+```
+
+When the recipe is prepared, the `finalize()` function learns to set the upper range of `mtry` to 74 predictors.
+
+-   Additionally, the results of `extract_parameter_set_dials()` will include engine-specific parameters (if any).
+
+-   They are discovered in the same way as the main arguments and included in the parameter set.
+
+-   The **`dials`** package contains parameter functions for all potentially tunable engine-specific parameters:
+
+```{r}
+#| labels: tuning parameter before finalizing
+
+rf_param
+```
+
+```{r}
+#| label: example of parameter function for tunable engine-specific parameters
+
+regularization_factor()
+```
+
+Finally, some tuning parameters are best associated with transformations.
+
+A good example of this is the penalty parameter associated with many regularized regression models.
+
+This parameter is nonnegative and it is common to vary its values in log units. The primary **`dials`** parameter object indicates that a transformation is used by default:
+
+```{r}
+#| label: penalty parameter
+
+penalty()
+```
+
+-   This is important to know, especially when altering the range.
+
+-   New range values must be in the transformed units:
+
+```{r}
+#| label: correct method to have penalty values between 0.1 and 1.0
+
+penalty(c(-1, 0)) |> value_sample(1000) |> summary()
+```
+
+```{r}
+#| label: incorrect method to have penalty values between 0.1 and 1.0
+
+penalty(c(0.1, 1.0)) |> value_sample(1000) |> summary()
+```
+
+-   The scale can be changed if desired with the `trans` argument.
+
+-   You can use natural units but the same range:
+
+```{r}
+#| label: adjusting the scale with trans argument 
+
+penalty(trans = NULL, range = 10^c(-10, 0))
+```

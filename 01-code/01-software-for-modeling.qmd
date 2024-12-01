@@ -1,0 +1,91 @@
+---
+title: "Software for modeling"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/09/13
+---
+
+# Software for modeling
+
+-   Models are mathematical tools that can describe a system and capture relationships in the data given to them.
+
+-   Models can be used for various purposes, including predicting future events, determining if there is a difference between several groups, aiding map-based visualization, discovering novel patterns in the data that could be further investigated, and more.
+
+-   There are two reasons that models permeate our lives today:
+
+    -   an abundance of software exists to create models, and
+
+    -   it has become easier to capture and store data, as well as make it accessible.
+
+## 1.1 Fundamentals for Modeling Software
+
+-   It is important that the modeling software you use is easy to operate properly. The user interface should not be so poorly designed that the user would not know that they used it inappropriately. For example, Baggerly and Coombes (2009) report myriad problems in the data analyses from a high profile computational biology publication. One of the issues was related to how the users were required to add the names of the model inputs. The software user interface made it easy to offset the column names of the data from the actual data columns. This resulted in the wrong genes being identified as important for treating cancer patients and eventually contributed to the termination of several clinical trials (Carlson 2012).
+
+-   As our models have become more powerful and complex, it has also become easier to commit latent errors.
+
+-   These two aspects of model development – ease of proper use and good methodological practice – are crucial.
+
+## 1.2 Types of Models
+
+Note that we have defined the type of a model by how it is used, rather than its mathematical qualities.
+
+-   Descriptive models: The purpose of a descriptive model is to describe or illustrate characteristics of some data. The analysis might have no other purpose than to visually emphasize some trend or artifact in the data.
+
+-   Inferential models: The goal of an inferential model is to produce a decision for a research question or to explore a specific hypothesis, similar to how statistical tests are used. An inferential model starts with a predefined conjecture or idea about a population and produces a statistical conclusion such as an interval estimate or the rejection of a hypothesis.
+
+    -   One aspect of inferential analyses is that there tends to be a delayed feedback loop in understanding how well the data match the model assumptions. In our clinical trial example, if statistical (and clinical) significance indicate that the new therapy should be available for patients to use, it still may be years before it is used in the field and enough data are generated for an independent assessment of whether the original statistical analysis led to the appropriate decision.
+
+-   Predictive models: Sometimes data are modeled to produce the most accurate prediction possible for new data. Here, the primary goal is that the predicted values have the highest possible fidelity to the true value of the new data. A simple example would be for a book buyer to predict how many copies of a particular book should be shipped to their store for the next month. An over-prediction wastes space and money due to excess books. If the prediction is smaller than it should be, there is opportunity loss and less profit.
+
+-   What are the most important factors affecting predictive models? There are many different ways that a predictive model can be created, so the important factors depend on how the model was developed.
+
+    -   A mechanistic model could be derived using first principles to produce a model equation that depends on assumptions. For example, when predicting the amount of a drug that is in a person’s body at a certain time, some formal assumptions are made on how the drug is administered, absorbed, metabolized, and eliminated. Based on this, a set of differential equations can be used to derive a specific model equation.
+
+    -   Empirically driven models are created with more vague assumptions. These models tend to fall into the machine learning category. A good example is the K-nearest neighbor (KNN) model. Given a set of reference data, a new sample is predicted by using the values of the K most similar data in the reference set. For example, if a book buyer needs a prediction for a new book, historical data from existing books may be available. A 5-nearest neighbor model would estimate the number of the new books to purchase based on the sales numbers of the five books that are most similar to the new one (for some definition of “similar”).
+
+## 1.3 Connections Between Types of Models
+
+An ordinary linear regression model might fall into any of these three classes of model, depending on how it is used:
+
+-   A descriptive smoother, similar to LOESS, called restricted smoothing splines (Durrleman and Simon 1989) can be used to describe trends in data using ordinary linear regression with specialized terms.
+
+-   An analysis of variance (ANOVA) model is a popular method for producing the p-values used for inference. ANOVA models are a special case of linear regression.
+
+-   If a simple linear regression model produces accurate predictions, it can be used as a predictive model.
+
+## 1.4 Some terminology
+
+Many models can be categorized as being supervised or unsupervised.
+
+-   Unsupervised models are those that learn patterns, clusters, or other characteristics of the data but lack an outcome, i.e., a dependent variable. Principal component analysis (PCA), clustering, and autoencoders are examples of unsupervised models; they are used to understand relationships between variables or sets of variables without an explicit relationship between predictors and an outcome.
+
+-   Supervised models are those that have an outcome variable. Linear regression, neural networks, and numerous other methodologies fall into this category. Within supervised models, there are two main sub-categories:
+
+    -   Regression predicts a numeric outcome.
+
+    -   Classification predicts an outcome that is an ordered or unordered set of qualitative values.
+
+-   Different variables can have different *roles*, especially in a supervised modeling analysis.
+
+    -   Outcomes (otherwise known as the labels, endpoints, or dependent variables) are the value being predicted in supervised models.
+
+    -   The independent variables, which are the substrate for making predictions of the outcome, are also referred to as predictors, features, or covariates (depending on the context). The terms *outcomes* and *predictors* are used most frequently in this book.
+
+## 1.5 How Does Modeling Fit into the Data Analysis Process?
+
+There are a few critical phases of data analysis that always come before modeling.
+
+![Figure 1.1: The data science process (from R for Data Science, used with permission)](images/01-data-science-model.svg){fig-alt="Data science model"}
+
+This iterative process is especially true for modeling. Figure 1.2 emulates the typical path to determining an appropriate model. The general phases are:
+
+-   Exploratory data analysis (EDA): Initially there is a back and forth between numerical analysis and data visualization (represented in Figure 1.1) where different discoveries lead to more questions and data analysis side-quests to gain more understanding.
+
+-   Feature engineering: The understanding gained from EDA results in the creation of specific model terms that make it easier to accurately model the observed data. This can include complex methodologies (e.g., PCA) or simpler features (using the ratio of two predictors). Chapter 8 focuses entirely on this important step.
+
+-   Model tuning and selection (large circles with alternating segments): A variety of models are generated and their performance is compared. Some models require parameter tuning in which some structural parameters must be specified or optimized. The alternating segments within the circles signify the repeated data splitting used during resampling (see Chapter 10).
+
+-   Model evaluation: During this phase of model development, we assess the model’s performance metrics, examine residual plots, and conduct other EDA-like analyses to understand how well the models work. In some cases, formal between-model comparisons (Chapter 11) help you understand whether any differences in models are within the experimental noise.
+
+![Figure 1.2: A schematic for the typical modeling process](images/02-modeling-process.svg){fig-alt="Modeling process"}

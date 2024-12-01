@@ -1,0 +1,655 @@
+---
+title: "Resampling for Evaluating Performance"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/10/12
+---
+
+# Resampling for Evaluating Performance
+
+-   Typically we can’t decide on which final model to use with the test set before first assessing model performance. There is a gap between our need to measure performance reliably and the data splits (training and testing) we have available.
+
+-   Resampling estimates of performance can generalize to new data in a similar way as estimates from a test set.
+
+```{r}
+#| label: load necessary packages
+
+library(tidymodels)
+tidymodels_prefer()
+```
+
+## 10.1 THE RESUBSTITUTION APPROACH
+
+-   When we measure performance on the same data that we used for training (as opposed to new data or testing data), we say we have *resubstituted* the data.
+
+-   *Random forests* are a tree ensemble method that operates by creating a large number of decision trees from slightly different versions of the training set (Breiman 2001a).
+
+-   This collection of trees makes up the ensemble. When predicting a new sample, each ensemble member makes a separate prediction. These are averaged to create the final ensemble prediction for the new data point.
+
+Using the same predictor set as the linear model (without the extra preprocessing steps), we can fit a random forest model to the training set via the `"ranger"` engine (which uses the **`ranger`** R package for computation). This model requires no preprocessing, so a simple formula can be used:
+
+```{r}
+#| label: building the random forest model
+
+rf_model <- 
+  rand_forest(trees = 1000) |> 
+  set_engine("ranger") |> 
+  set_mode("regression")
+
+rf_model
+```
+
+```{r}
+#| label: define workflow object
+
+rf_wflow <- 
+  workflow() |> 
+  add_formula(
+    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+      Latitude + Longitude
+    ) |> 
+  add_model(rf_model)
+
+rf_wflow
+```
+
+```{r}
+#| label: fit the workflow
+
+rf_fit <- rf_wflow |> fit(data = ames_train)
+
+rf_fit
+```
+
+How should we compare the linear and random forest models? For demonstration, we will predict the training set to produce what is known as an *apparent metric* or *resubstitution metric*. This function creates predictions and formats the results:
+
+```{r}
+#| label: function to create predictions and format the results
+
+estimate_perf <- function(model, dat) {
+  # Capture the names of the `model` and `dat` objects
+  cl <- match.call()
+  
+  obj_name <- as.character(cl$model)
+  
+  data_name <- as.character(cl$dat)
+  
+  data_name <- gsub("ames_", "", data_name)
+  
+  
+  # Estimate these metrics:
+  reg_metrics <- metric_set(rmse, rsq)
+  
+  
+  model |> 
+    predict(dat) |> 
+    bind_cols(dat |> select(Sale_Price)) |> 
+    reg_metrics(Sale_Price, .pred) |> 
+    select(-.estimator) |> 
+    mutate(object = obj_name, data = data_name)
+}
+```
+
+Both RMSE and $R^2$ are computed. The resubstitution statistics are:
+
+```{r}
+#| label: the resubstitution statistics for linear regression model
+
+estimate_perf(lm_fit, ames_train)
+```
+
+```{r}
+#| label: the resubstitution statistics for random forest model
+
+estimate_perf(rf_fit, ames_train)
+```
+
+Based on these results, the random forest is much more capable of predicting the sale prices; the RMSE estimate is two-fold better than linear regression. If we needed to choose between these two models for this price prediction problem, we would probably chose the random forest because, on the log scale we are using, its RMSE is about half as large. The next step applies the random forest model to the test set for final verification:
+
+```{r}
+#| label: apply the random forest model to the test set
+
+estimate_perf(rf_fit, ames_test)
+```
+
+The test set RMSE estimate, 0.0704, is *much worse than the training set* value of 0.0365! Why did this happen?
+
+Many predictive models are capable of learning complex trends from the data. In statistics, these are commonly referred to as *low bias models*.
+
+In this context, *bias* is the difference between the true pattern or relationships in data and the types of patterns that the model can emulate. Many black-box machine learning models have low bias, meaning they can reproduce complex relationships. Other models (such as linear/logistic regression, discriminant analysis, and others) are not as adaptable and are considered *high bias* models
+
+The main takeaway from this example is that repredicting the training set will result in an artificially optimistic estimate of performance. It is a bad idea for most models.
+
+If the test set should not be used immediately, and repredicting the training set is a bad idea, what should be done? Resampling methods, such as cross-validation or validation sets, are the solution.
+
+## 10.2 RESAMPLING METHODS
+
+-   Resampling methods are empirical simulation systems that emulate the process of using some data for modeling and different data for evaluation.
+
+-   Most resampling methods are iterative, meaning that this process is repeated multiple times.
+
+-   Resampling is conducted only on the training set. The test set is not involved. For each iteration of resampling, the data are partitioned into two subsamples:
+
+    -   The model is fit with the *analysis set*.
+
+    -   The model is evaluated with the *assessment set*.
+
+-   These two subsamples are somewhat analogous to training and test sets. Our language of *analysis* and *assessment* avoids confusion with the initial split of the data.
+
+### 10.2.1 CROSS-VALIDATION
+
+Cross-validation is a well established resampling method. While there are a number of variations, the most common cross-validation method is *V*-fold cross-validation. The data are randomly partitioned into *V* sets of roughly equal size (called the folds).
+
+What are the effects of changing *V*? Larger values result in resampling estimates with small bias but substantial variance. Smaller values of *V* have large bias but low variance. We prefer 10-fold since noise is reduced by replication, but bias is not.
+
+The primary input is the training set data frame as well as the number of folds (defaulting to 10):
+
+```{r}
+#| label: V-fold cross validation for Ames training data set
+
+set.seed(1001)
+
+ames_folds <- vfold_cv(ames_train, v = 10)
+ames_folds
+```
+
+```{r}
+#| label: return the analysis partitions of the data
+
+# For the fist fold:
+
+ames_folds$splits[[1]] |> analysis() |> dim()
+```
+
+```{r}
+#| label: return the assesment partitions of the data
+
+# For the fist fold:
+
+ames_folds$splits[[1]] |> assessment() |> dim()
+```
+
+#### REPEATED CROSS-VALIDATION
+
+he most important variation on cross-validation is repeated *V*-fold cross-validation. Depending on data size or other characteristics, the resampling estimate produced by *V*-fold cross-validation may be excessively noisy. As with many statistical problems, one way to reduce noise is to gather more data. For cross-validation, this means averaging more than *V* statistics.
+
+To create repeats, invoke `vfold_cv()` with an additional argument `repeats`:
+
+```{r}
+#| label: 10-fold cross-validation repeated 5 times
+
+vfold_cv(ames_train, v = 10, repeats = 5)
+```
+
+#### LEAVE-ONE-OUT CROSS-VALIDATION
+
+One variation of cross-validation is leave-one-out (LOO) cross-validation. If there are $n$ training set samples, $n$ models are fit using $n$−1 rows of the training set. Each model predicts the single excluded data point. At the end of resampling, the $n$ predictions are pooled to produce a single performance statistic.
+
+#### MONTE CARLO CROSS-VALIDATION
+
+Another variant of *V*-fold cross-validation is Monte Carlo cross-validation (MCCV, Xu and Liang (2001)). Like *V*-fold cross-validation, it allocates a fixed proportion of data to the assessment sets. The difference between MCCV and regular cross-validation is that, for MCCV, this proportion of the data is randomly selected each time. This results in assessment sets that are not mutually exclusive. To create these resampling objects:
+
+```{r}
+#| label: creating Monte Carlo cross-validation
+
+mc_cv(ames_train, prop = 9/10, times = 20)
+```
+
+### 10.2.2 VALIDATION SETS
+
+-   When using a validation set, the initial available data set is split into a training set, a validation set, and a test set
+
+-   Validation sets are often used when the original pool of data is very large.
+
+-   In this case, a single large partition may be adequate to characterize model performance without having to do multiple resampling iterations.
+
+```{r}
+#| label: validation split code from Section 5.2
+
+# Previously
+
+set.seed(52)
+
+# To put 60% into training, 20% in validation, and 20% in testing:
+
+ames_val_split <- initial_validation_split(ames, prop = c(0.6, 0.2))
+ames_val_split
+```
+
+```{r}
+#| label: object used for resampling
+
+val_set <- validation_set(ames_val_split)
+val_set
+```
+
+### 10.2.3 BOOTSTRAPPING
+
+-   A bootstrap sample of the training set is a sample that is the same size as the training set but is drawn *with replacement*.
+
+-   This means that some training set data points are selected multiple times for the analysis set.
+
+-   Each data point has a 63.2% chance of inclusion in the training set at least once.
+
+-   The assessment set contains all of the training set samples that were not selected for the analysis set (on average, with 36.8% of the training set). When bootstrapping, the assessment set is often called the *out-of-bag* sample.
+
+-   Note that the sizes of the assessment sets vary.
+
+-   Using the **`rsample`** package, we can create such bootstrap resamples:
+
+```{r}
+#| label: creating bootstrap samples
+
+bootstraps(ames_train, times = 5)
+```
+
+-   Bootstrap samples produce performance estimates that have very low variance (unlike cross-validation) but have significant pessimistic bias.
+
+-   This means that, if the true accuracy of a model is 90%, the bootstrap would tend to estimate the value to be less than 90%. T
+
+-   he amount of bias cannot be empirically determined with sufficient accuracy. Additionally, the amount of bias changes over the scale of the performance metric.
+
+-   For example, the bias is likely to be different when the accuracy is 90% versus when it is 70%.
+
+### 10.2.4 ROLLING FORECASTING ORIGIN RESAMPLING
+
+-   When the data have a strong time component, a resampling method should support modeling to estimate seasonal and other temporal trends within the data.
+
+-   A technique that randomly samples values from the training set can disrupt the model’s ability to estimate these patterns.
+
+-   Rolling forecast origin resampling (Hyndman and Athanasopoulos 2018) provides a method that emulates how time series data is often partitioned in practice, estimating the model with historical data and evaluating it with the most recent data.
+
+-   For this type of resampling, the size of the initial analysis and assessment sets are specified.
+
+    -   The first iteration of resampling uses these sizes, starting from the beginning of the series.
+
+    -   The second iteration uses the same data sizes but shifts over by a set number of samples.
+
+-   Here are two different configurations of this method:
+
+    -   The analysis set can cumulatively grow (as opposed to remaining the same size). After the first initial analysis set, new samples can accrue without discarding the earlier data.
+
+    -   The resamples need not increment by one. For example, for large data sets, the incremental block could be a week or month instead of a day.
+
+For a year’s worth of data, suppose that six sets of 30-day blocks define the analysis set. For assessment sets of 30 days with a 29-day skip, we can use the **`rsample`** package to specify:
+
+```{r}
+#| label: example of rolling forecast origin resampling: time slices tibble
+
+time_slices <- 
+  tibble(x = 1:365) |> 
+  rolling_origin(initial = 6 * 30, assess = 30, skip = 29, cumulative = FALSE)
+
+time_slices
+```
+
+```{r}
+#| label: define a function to range the data from beginning to the end
+
+data_range <- function(x) {
+  summarize(x, first = min(x), last = max(x))
+}
+```
+
+```{r}
+#| label: get the analysis data set range from the time slices object
+
+map_dfr(time_slices$splits, ~ analysis(.x) |> data_range())
+```
+
+```{r}
+#| label: get the assessment data set range from the time slices object
+
+map_dfr(time_slices$splits, ~ assessment(.x) |> data_range())
+```
+
+## 10.3 ESTIMATING PERFORMANCE
+
+Any of the resampling methods discussed in this chapter can be used to evaluate the modeling process (including preprocessing, model fitting, etc). These methods are effective because different groups of data are used to train the model and assess the model. To reiterate, the process to use resampling is:
+
+1.  During resampling, the analysis set is used to preprocess the data, apply the preprocessing to itself, and use these processed data to fit the model.
+
+2.  The preprocessing statistics produced by the analysis set are applied to the assessment set. The predictions from the assessment set estimate performance on new data.
+
+-   This sequence repeats for every resample.
+
+-   If there are *B* resamples, there are *B* replicates of each of the performance metrics.
+
+-   The final resampling estimate is the average of these *B* statistics. If *B* = 1, as with a validation set, the individual statistics represent overall performance.
+
+`model_spec |> fit_resamples(formula, resamples, ...)`
+
+`model_spec |> fit_resamples(recipe, resamples, ...)`
+
+`workflow |> fit_resamples( resamples, ...)`
+
+There are a number of other optional arguments, such as:
+
+-   `metrics`: A metric set of performance statistics to compute. By default, regression models use RMSE and $R^2$ while classification models compute the area under the ROC curve and overall accuracy. Note that this choice also defines what predictions are produced during the evaluation of the model. For classification, if only accuracy is requested, class probability estimates are not generated for the assessment set (since they are not needed).
+
+-   `control`: A list created by `control_resamples()` with various options.
+
+The control arguments include:
+
+-   `verbose`: A logical for printing logging.
+
+-   `extract`: A function for retaining objects from each model iteration (discussed later in this chapter).
+
+-   `save_pred`: A logical for saving the assessment set predictions.
+
+For our example, let’s save the predictions in order to visualize the model fit and residuals:
+
+```{r}
+#| label: saving predictions in order to visualize the model fit and residuals
+
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+keep_pred
+```
+
+```{r}
+#| label: random forest model fitting using the above control object
+
+set.seed(1003)
+
+rf_res <- 
+  rf_wflow |> 
+  fit_resamples(resamples = ames_folds, control = keep_pred)
+
+rf_res
+```
+
+The return value is a tibble similar to the input resamples, along with some extra columns:
+
+-   `.metrics` is a list column of tibbles containing the assessment set performance statistics.
+
+-   `.notes` is another list column of tibbles cataloging any warnings or errors generated during resampling. Note that errors will not stop subsequent execution of resampling.
+
+-   `.predictions` is present when `save_pred = TRUE`. This list column contains tibbles with the out-of-sample predictions.
+
+```{r}
+#| label: returning the performance metrics in a more usable format
+
+collect_metrics(rf_res)
+```
+
+These are the resampling estimates averaged over the individual replicates. To get the metrics for each resample, use the option `summarize = FALSE`.
+
+```{r}
+#| label: get the metrics for each resample
+
+collect_metrics(rf_res, summarize = FALSE)
+```
+
+Notice how much more realistic the performance estimates are than the resubstitution estimates from Section 10.1.
+
+```{r}
+#| label: obtain the assessment set predictions
+
+assess_res <- collect_predictions(rf_res)
+assess_res
+```
+
+-   The prediction column names follow the conventions discussed for **parsnip** models in Chapter 6, for consistency and ease of use.
+
+-   The observed outcome column always uses the original column name from the source data.
+
+-   The `.row` column is an integer that matches the row of the original training set so that these results can be properly arranged and joined with the original data.
+
+-   For some resampling methods, such as the bootstrap or repeated cross-validation, there will be multiple predictions per row of the original training set.
+
+-   To obtain summarized values (averages of the replicate predictions) use `collect_predictions(object, summarize = TRUE)`.
+
+```{r}
+#| label: comparison of the observed and held-out predicted values
+
+assess_res |> 
+  ggplot(aes(x = Sale_Price, y = .pred)) +
+  geom_point(alpha = .15) +
+  geom_abline(color = "red") +
+  coord_obs_pred() +
+  ylab("Predicted") +
+  theme_bw()
+```
+
+There are two houses in the training set with a low observed sale price that are significantly overpredicted by the model. Which houses are these? Let’s find out from the `assess_res` result:
+
+```{r}
+#| label: find the resamples with the houses whose prices are overpredicted
+
+over_predicted <- 
+  assess_res |> 
+  mutate(residual = Sale_Price - .pred) |> 
+  arrange(desc(abs(residual))) |> 
+  slice(1:2)
+
+over_predicted
+```
+
+```{r}
+#| label: find the houses whose prices are overpredicted
+
+ames_train |> 
+  slice(over_predicted$.row) |> 
+  select(Gr_Liv_Area, Neighborhood, Year_Built, Bedroom_AbvGr, Full_Bath)
+```
+
+Identifying examples like these with especially poor performance can help us follow up and investigate why these specific predictions are so poor.
+
+Let’s move back to the homes overall. How can we use a validation set instead of cross-validation? From our previous **`rsample`** object:
+
+```{r}
+#| label: use a validation set instead of cross-validation
+
+val_res <- rf_wflow |> 
+  fit_resamples(resamples = val_set)
+
+val_res
+```
+
+```{r}
+#| label: get the metrics for each resample
+
+collect_metrics(val_res)
+```
+
+These results are also much closer to the test set results than the resubstitution estimates of performance.
+
+## 10.4 PARALLEL PROCESSING
+
+The models created during resampling are independent of one another.
+
+-   Computations of this kind are sometimes called *embarrassingly parallel*; each model could be fit simultaneously without issues.
+
+-   The **`tune`** package uses the **`foreach`** package to facilitate parallel computations.
+
+-   These computations could be split across processors on the same computer or across different computers, depending on the chosen technology.
+
+-   For computations conducted on a single computer, the number of possible worker processes is determined by the **`parallel`** package:
+
+```{r}
+#| label: the number of physical cores in the hardware:
+
+parallel::detectCores(logical = FALSE)
+```
+
+```{r}
+#| label: the number of possible independent processes that can be simultaneously used
+
+parallel::detectCores(logical = TRUE)
+```
+
+-   The difference between these two values is related to the computer’s processor.
+
+-   For example, most Intel processors use hyperthreading, which creates two virtual cores for each physical core.
+
+-   While these extra resources can improve performance, most of the speed-ups produced by parallel processing occur when processing uses fewer than the number of physical cores.
+
+For \``fit_resamples()` and other functions in **`tune`**, parallel processing occurs when the user registers a parallel backend package.
+
+These R packages define how to execute parallel processing.
+
+On Unix and macOS operating systems, one method of splitting computations is by forking threads.
+
+To enable this, load the **`doMC`** package and register the number of parallel cores with **`foreach`**:
+
+```{r}
+#| label: load necessary packages
+
+library(doMC)
+```
+
+```{r}
+#| label: do Multiple Cores: redister cores - Unix and macOS only
+
+registerDoMC(cores = 2)
+```
+
+This instructs `fit_resamples()` to run half of the computations on each of two cores. To reset the computations to sequential processing:
+
+```{r}
+#| label: resetting the computations to sequential processing
+
+registerDoSEQ()
+```
+
+Alternatively, a different approach to parallelizing computations uses network sockets. The **`doParallel`** package enables this method (usable by all operating systems):
+
+```{r}
+#| label: load necessary packages
+
+library(doParallel)
+```
+
+```{r}
+#| label: using network sockets - all operating systems
+
+# Create a cluster object and then register:
+
+cl <- makePSOCKcluster(2)
+registerDoParallel(cl)
+```
+
+```{r}
+#| label: stopping the cluster
+
+stopCluster(cl)
+```
+
+-   Another R package that facilitates parallel processing is the **`future`** package.
+
+-   Like **`foreach`**, it provides a framework for parallelism.
+
+-   This package is used in conjunction with **`foreach`** via the **`doFuture`** package.
+
+Let’s wrap up with one final note about parallelism. For each of these technologies, the memory requirements multiply for each additional core used. For example, if the current data set is 2 GB in memory and three cores are used, the total memory requirement is 8 GB (2 for each worker process plus the original). Using too many cores might cause the computations (and the computer) to slow considerably.
+
+## 10.5 SAVING THE RESAMPLED OBJECTS
+
+-   The models created during resampling are not retained.
+
+-   These models are trained for the purpose of evaluating performance, and we typically do not need them after we have computed performance statistics.
+
+-   If a particular modeling approach does turn out to be the best option for our data set, then the best choice is to fit again to the whole training set so the model parameters can be estimated with more data.
+
+Let’s fit a linear regression model using the recipe we developed in Chapter 8:
+
+```{r}
+#| label: building the the recipe
+
+ames_rec <- 
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+           Latitude + Longitude, data = ames_train) |> 
+  step_other(Neighborhood, threshold = 0.01) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_")) |> 
+  step_ns(Latitude, Longitude, deg_free = 20)
+```
+
+```{r}
+#| label: build the workflow using the recipe
+
+lm_wflow <- 
+  workflow() |> 
+  add_recipe(ames_rec) |> 
+  add_model(linear_reg() |> set_engine("lm"))
+```
+
+```{r}
+#| label: fitting the model using the workflow
+
+lm_fit <- lm_wflow |> fit(data = ames_train)
+
+lm_fit
+```
+
+```{r}
+#| label: selecting the recipe
+
+extract_recipe(lm_fit, estimated = TRUE)
+```
+
+We can save the linear model coefficients for a fitted model object from a workflow:
+
+```{r}
+#| label: define a function to save the linear model coefficients
+
+get_model <- function(x) {
+  
+  extract_fit_parsnip(x) |> tidy()
+  
+}
+```
+
+```{r}
+#| label: test the function
+
+get_model(lm_fit)
+```
+
+Now let’s apply this function to the ten resampled fits. The results of the extraction function is wrapped in a list object and returned in a tibble:
+
+```{r}
+#| label: set the control object using the defined function
+
+ctrl <- control_resamples(extract = get_model)
+
+ctrl
+```
+
+```{r}
+#| label: apply the new function to the ten resampled fits
+
+lm_res <- lm_wflow |> fit_resamples(resamples = ames_folds, control = ctrl)
+
+lm_res
+```
+
+Now there is a `.extracts` column with nested tibbles. What do these contain? Let’s find out by subsetting.
+
+```{r}
+#| label: subsetting the .extracts column: first layer
+
+lm_res$.extracts[[1]]
+```
+
+```{r}
+#| label: subsetting the .extracts column: second layer - get the results
+
+lm_res$.extracts[[1]][[1]]
+```
+
+For our more simple example, all of the results can be flattened and collected using:
+
+```{r}
+#| label: flattening and collecting the results
+
+all_coef <- map_dfr(lm_res$.extracts, ~ .x[[1]][[1]])
+
+all_coef
+```
+
+```{r}
+#| label: show the replicates for a single predictor:
+filter(all_coef, term == "Year_Built")
+```

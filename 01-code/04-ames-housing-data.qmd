@@ -1,0 +1,71 @@
+---
+title: "The Ames Housing Data"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/09/21
+---
+
+# The Ames Housing Data
+
+```{r}
+#| label: load necessary packages
+
+library(tidymodels)
+tidymodels_prefer()
+library(modeldata) # This is also loaded by the tidymodels package
+```
+
+```{r}
+#| label: load data set - 1 method (after laoding the container package)
+
+data(ames)
+```
+
+```{r}
+#| label: load data set - 2 method (in one line)
+
+data(ames, package = "modeldata")
+
+dim(ames)
+```
+
+```{r}
+#| label: explore the house prices
+
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram() +
+  labs(title = "Sale prices of houses in Ames, Iowa") +
+  theme_bw()
+```
+
+This plot shows us that the data are right-skewed; there are more inexpensive houses than expensive ones.
+
+The median sale price was \$160,000, and the most expensive house was \$755,000.
+
+When modeling this outcome, a strong argument can be made that the price should be log-transformed.
+
+The advantages of this type of transformation are that no houses would be predicted with negative sale prices and that errors in predicting expensive houses will not have an undue influence on the model.
+
+Also, from a statistical perspective, a logarithmic transform may also stabilize the variance in a way that makes inference more legitimate. We can use similar steps to now visualize the transformed data, shown in Figure 4.2.
+
+```{r}
+#| label: log transforming the sale price
+
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram(bins = 50, col = "white") +
+  scale_x_log10() +
+  labs(title = "Sale prices of houses in Ames, Iowa after a log (base 10) transformation") +
+  theme_bw()
+```
+
+-   The disadvantages of transforming the outcome mostly relate to interpretation of model results.
+
+-   The units of the model coefficients might be more difficult to interpret, as will measures of performance. For example, the root mean squared error (RMSE) is a common performance metric used in regression models. It uses the difference between the observed and predicted values in its calculations. If the sale price is on the log scale, these differences (i.e., the residuals) are also on the log scale. It can be difficult to understand the quality of a model whose RMSE is 0.15 on such a log scale.
+
+-   Despite these drawbacks, the models used in this book use the log transformation for this outcome. *From this point on*, the outcome column is prelogged in the `ames` data frame:
+
+```{r}
+#| label: save log transformed sale prices
+ames <- ames |> mutate(Sale_Price = log10(Sale_Price))
+```

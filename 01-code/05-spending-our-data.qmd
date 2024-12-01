@@ -1,0 +1,146 @@
+---
+title: "Spending our Data"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/09/2024
+---
+
+# Spending our Data
+
+-   There are several steps to creating a useful model, including parameter estimation, model selection and tuning, and performance assessment.
+
+-   At the start of a new project, there is usually an initial finite pool of data available for all these tasks, which we can think of as an available data budget.
+
+-   How should the data be applied to different steps or tasks?
+
+-   The idea of *data spending* is an important first consideration when modeling, especially as it relates to empirical validation.
+
+-   When data are reused for multiple tasks, instead of carefully “spent” from the finite data budget, certain risks increase, such as the risk of accentuating bias or compounding effects from methodological errors.
+
+-   When there are copious amounts of data available, a smart strategy is to allocate specific subsets of data for different tasks, as opposed to allocating the largest possible amount (or even all) to the model parameter estimation only. For example, one possible strategy (when both data and predictors are abundant) is to spend a specific subset of data to determine which predictors are informative, before considering parameter estimation at all.
+
+-   If the initial pool of data available is not huge, there will be some overlap in how and when our data is “spent” or allocated, and a solid methodology for data spending is important.
+
+## 5.1 COMMON METHODS FOR SPLITTING DATA
+
+-   The primary approach for empirical model validation is to split the existing pool of data into two distinct sets, the training set and the test set. One portion of the data is used to develop and optimize the model. This *training set* is usually the majority of the data. These data are a sandbox for model building where different models can be fit, feature engineering strategies are investigated, and so on.
+
+-   The other portion of the data is placed into the *test set*. This is held in reserve until one or two models are chosen as the methods most likely to succeed. The test set is then used as the final arbiter to determine the efficacy of the model. It is critical to look at the test set only once; otherwise, it becomes part of the modeling process.
+
+```{r}
+#| label: load necessary packages
+#| warning: false
+
+library(tidymodels)
+tidymodels_prefer()
+```
+
+```{r}
+#| label: set the random number stream
+
+# Set the random number stream using `set.seed()` so that the results can be reproduced later.
+set.seed(501)
+```
+
+```{r}
+#| label: split object by 80/20 (training/test)
+
+# Save the split information for an 80/20 split of the data
+ames_split <- initial_split(ames, prop = 0.80)
+ames_split
+```
+
+The object `ames_split` is an `rsplit` object and contains only the partitioning information; to get the resulting data sets, we apply two more functions:
+
+```{r}
+#| label: build the training and test data sets via split object
+
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+dim(ames_train)
+```
+
+-   As discussed in Chapter 4, the sale price distribution is right-skewed, with proportionally more inexpensive houses than expensive houses on either side of the center of the distribution.
+
+-   The worry here with simple splitting is that the more expensive houses would not be well represented in the training set; this would increase the risk that our model would be ineffective at predicting the price for such properties.
+
+```{r}
+#| label: plot the density of the sale price
+
+ames |> 
+  ggplot(aes(x = Sale_Price)) +
+  geom_density(color = "black") +
+  # Add dashed vertical lines, for example, at the 25th, 50th, and 75th percentiles
+  geom_vline(aes(xintercept = quantile(Sale_Price, probs = 0.25)),
+             linetype = "dashed", color = "black") +
+  geom_vline(aes(xintercept = quantile(Sale_Price, probs = 0.50)),
+             linetype = "dashed", color = "black") +
+  geom_vline(aes(xintercept = quantile(Sale_Price, probs = 0.75)),
+             linetype = "dashed", color = "black") +
+  labs(x = "Sale Price (log-10 USD)", y = NULL) +
+  theme_bw()
+```
+
+-   The dotted vertical lines in Figure indicate the four quartiles for these data. A stratified random sample would conduct the 80/20 split within each of these data subsets and then pool the results. In **`rsample`**, this is achieved using the `strata` argument:
+
+```{r}
+#| label: new split object for stratified random sampling
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+dim(ames_train)
+```
+
+-   Only a single column can be used for stratification.
+
+## 5.2 WHAT ABOUT A VALIDATION SET?
+
+-   When describing the goals of data splitting, we singled out the test set as the data that should be used to properly evaluate of model performance on the final model(s).
+
+-   This begs the question: “How can we tell what is best if we don’t measure performance until the test set?”
+
+-   It is common to hear about *validation sets* as an answer to this question, especially in the neural network and deep learning literature.
+
+-   Whether validation sets are a subset of the training set or a third allocation in the initial split of the data largely comes down to semantics.
+
+```{r}
+#| label: create a split object which includes a validation split
+
+set.seed(52)
+# To put 60% into training, 20% in validation, and 20% in testing:
+ames_val_split <- initial_validation_split(ames, prop = c(0.6, 0.2))
+ames_val_split
+```
+
+```{r}
+#| label: create data sets
+
+ames_train <- training(ames_val_split)
+ames_test <- testing(ames_val_split)
+ames_val <- validation(ames_val_split)
+```
+
+## 5.3 MULTILEVEL DATA
+
+With the Ames housing data, a property is considered to be the *independent experimental unit*. It is safe to assume that, statistically, the data from a property are independent of other properties. For other applications, that is not always the case:
+
+-   For longitudinal data, for example, the same independent experimental unit can be measured over multiple time points. An example would be a human subject in a medical trial.
+
+-   A batch of manufactured product might also be considered the independent experimental unit. In repeated measures designs, replicate data points from a batch are collected at multiple times.
+
+-   Johnson et al. (2018) report an experiment where different trees were sampled across the top and bottom portions of a stem. Here, the tree is the experimental unit and the data hierarchy is sample within stem position within tree.
+
+-   In these situations, the data set will have multiple rows per experimental unit. Simple resampling across rows would lead to some data within an experimental unit being in the training set and others in the test set.
+
+-   Data splitting should occur at the independent experimental unit level of the data. 
+
+## 5.4 OTHER CONSIDERATIONS FOR A DATA BUDGET
+
+-   When deciding how to spend the data available to you, keep a few more things in mind. First, it is critical to quarantine the test set from any model building activities.
+
+-   The problem of *information leakage* occurs when data outside of the training set are used in the modeling process.

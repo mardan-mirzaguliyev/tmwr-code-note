@@ -1,0 +1,349 @@
+---
+title: "A Review of R Modeling Fundamentals"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/09/18
+---
+
+# A Review of R Modeling Fundamentals
+
+## 3.1 AN EXAMPLE
+
+```{r}
+#| label: load necessary packages
+#| warning: false
+
+library(tidyverse)
+library(lattice)
+library(broom)
+library(forcats)
+library(dplyr)
+library(tidymodels)
+library(conflicted)
+```
+
+```{r}
+#| label: load the experimental data set
+
+data(crickets, package = "modeldata")
+names(crickets)
+```
+
+```{r}
+#| label: plots
+
+# Plot the temperature on the x-axis, the chirp rate on the y-axis. The plot
+# elements will be colored differently for each species:
+ggplot(crickets, 
+       aes(x = temp, y = rate, color = species, pch = species, lty = species)) +
+  # Plot points for each data point and color by species
+  geom_point(size = 2) +
+  # Show a simple lineaqr model fit created separately for each species:
+  geom_smooth(method = lm, se = FALSE, alpha = 0.5) +
+  scale_color_brewer(palette = "Paired") +
+  labs(x = "Temperature (C)", 
+       y = "Chirp Rate (per minute)",
+       title = "Relationship between chirp rate and temperature for two different species of crickets"
+       ) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+The data exhibit fairly linear trends for each species. For a given temperature, *O. exclamationis* appears to chirp more per minute than the other species. For an inferential model, the researchers might have specified the following null hypotheses prior to seeing the data:
+
+-   Temperature has no effect on the chirp rate.
+
+-   There are no differences between the species’ chirp rate.
+
+```{r}
+#| label: linear model formula
+
+rate ~ temp
+```
+
+-   This formula specifies that the chirp rate is the outcome (since it is on the left-hand side of the tilde `~`) and that the temperature value is the predictor.
+
+-   Suppose the data contained the time of day in which the measurements were obtained in a column called `time`. The formula:
+
+```{r}
+#| label: temperature and time as separate main effects for the model
+
+rate ~ temp + time
+```
+
+-   would not add the time and temperature values together. This formula would symbolically represent that temperature and time should be added as separate *main effects* to the model.
+
+-   A main effect is a model term that contains a single predictor variable.
+
+There are no time measurements in these data but the species can be added to the model in the same way:
+
+```{r}
+#| label: species added as one of the main effects
+
+rate ~ temp + species
+```
+
+-   The model formula `rate ~ temp + species` creates a model with different y-intercepts for each species; the slopes of the regression lines could be different for each species as well.
+
+-   To accommodate this structure, an interaction term can be added to the model. This can be specified in a few different ways, and the most basic uses the colon:
+
+```{r}
+#| label: interactions
+
+rate ~ temp + species + temp:species
+
+# A shortcut can be used to expand all interactions containing
+# interactions with two variables:
+rate ~ (temp + species)^2
+
+# Another shortcut to expand factors to include all possible
+# interactions (equivalent for this example):
+rate ~ temp * species
+```
+
+In addition to the convenience of automatically creating indicator variables, the formula offers a few other niceties:
+
+-   *In-line* functions can be used in the formula. For example, to use the natural log of the temperature, we can create the formula `rate ~ log(temp)`. Since the formula is symbolic by default, literal math can also be applied to the predictors using the identity function `I()`. To use Fahrenheit units, the formula could be `rate ~ I( (temp * 9/5) + 32 )` to convert from Celsius.
+
+-   R has many functions that are useful inside of formulas. For example, `poly(x, 3)` adds linear, quadratic, and cubic terms for `x` to the model as main effects. The **splines** package also has several functions to create nonlinear spline terms in the formula.
+
+-   For data sets where there are many predictors, the period shortcut is available. The period represents main effects for all of the columns that are not on the left-hand side of the tilde. Using `~ (.)^3`would add main effects as well as all two- and three-variable interactions to the model.
+
+```{r}
+#| label: fitting a model to the crickets data
+interaction_fit <- lm(rate ~ (temp + species)^2, data = crickets)
+
+# To print a short summary of the model:
+interaction_fit
+```
+
+```{r}
+#| label: plot the fit: Residuals vs predicted values
+
+# Place two plots next to one another:
+par(mfrow = c(1, 2))
+
+# Show residuals vs predicted values:
+plot(interaction_fit, which = 1)
+```
+
+```{r}
+#| label: plot the fit: 
+
+# A normal quantile plot on the residuals:
+plot(interaction_fit, which = 2)
+```
+
+```{r}
+#| label: assessing if the inclusion of the interaction term is necessary
+
+# Fit a reduced model:
+main_effect_fit <- lm(rate ~ temp + species, data = crickets)
+
+# Compute the two:
+anova(main_effect_fit, interaction_fit)
+```
+
+```{r}
+#| label: inspect the coefficients, standard errors, and p-values of each model term
+
+summary(main_effect_fit) 
+```
+
+-   The chirp rate for each species increases by 3.6 chirps as the temperature increases by a single degree. This term shows strong statistical significance as evidenced by the p-value.
+
+-   The species term has a value of -10.07. This indicates that, across all temperature values, *O. niveus* has a chirp rate that is about 10 fewer chirps per minute than *O. exclamationis*. Similar to the temperature term, the species effect is associated with a very small p-value.
+
+-   The only issue in this analysis is the intercept value. It indicates that at 0° C, there are negative chirps per minute for both species. While this doesn’t make sense, the data only go as low as 17.2° C and interpreting the model at 0° C would be an extrapolation.
+
+-   This would be a bad idea. That being said, the model fit is good within the *applicable range* of the temperature values; the conclusions should be limited to the observed temperature range.
+
+```{r}
+#| label: predicting chirp rates
+
+new_values <- data.frame(species = "O. exclamationis", temp = 15:20)
+
+predict(main_effect_fit, new_values)
+```
+
+While this analysis has obviously not been an exhaustive demonstration of R’s modeling capabilities, it does highlight some major features important for the rest of this book:
+
+-   The language has an expressive syntax for specifying model terms for both simple and quite complex models.
+
+-   The R formula method has many conveniences for modeling that are also applied to new data when predictions are generated.
+
+-   There are numerous helper functions (e.g., `anova()`, `summary()` and `predict()`) that you can use to conduct specific calculations after the fitted model is created.
+
+## 3.2 WHAT DOES THE R FORMULA DO?
+
+The R model formula is used by many modeling packages. It usually serves multiple purposes:
+
+-   The formula defines the columns that the model uses.
+
+-   The standard R machinery uses the formula to encode the columns into an appropriate format.
+
+-   The roles of the columns are defined by the formula.
+
+```{r}
+#| label: the columns that are used for the model generation
+
+rate ~ (temp + species)^2
+```
+
+-   Our focus, when seeing this, is that there are two predictors and the model should contain their main effects and the two-way interactions.
+
+-   However, this formula also implies that, since `species` is a factor, it should also create indicator variable columns for this predictor and multiply those columns by the `temp` column to create the interactions.
+
+-   This transformation represents our second bullet point on encoding; the formula also defines how each column is encoded and can create additional columns that are not in the original data.
+
+## 3.3 WHY TIDYNESS IS IMPORTANT FOR MODELING
+
+```{r}
+#| label: create a tibble for sample plotting
+
+plot_data <- tibble(x = 1:1000, y = 1001:2000)
+```
+
+```{r}
+#| label: first method to create a scatter plot
+
+plot(plot_data$x, plot_data$y)
+```
+
+```{r}
+#| label: second method to create a scatter plot
+
+xyplot(y ~ x, data = plot_data)
+```
+
+```{r}
+#| label: third method to create a scatter plot
+
+ggplot(plot_data, aes(x = x, y = y)) + geom_point()
+```
+
+```{r}
+#| label: handling missing values - predict() method default
+
+# Add a missing value to the prediction set
+new_values$temp[1] <- NA
+
+# The predict method for `lm` defaults to `na.pass`:
+predict(main_effect_fit, new_values)
+```
+
+```{r}
+#| label: handling missing values - na.fail
+
+# Alternatively
+
+# predict(main_effect_fit, new_values, na.action = na.fail)
+# Error in na.fail.default(list(temp = c(NA, 16L, 17L, 18L, 19L, 20L), species = c("O. exclamationis",  : missing values in object
+```
+
+```{r}
+#| label: handling missing values - na.omit
+
+predict(main_effect_fit, new_values, na.action = na.omit)
+```
+
+Most of the tidymodels design goals fall under the existing rubric of “Design for Humans” from the tidyverse (Wickham et al. 2019), but with specific applications for modeling code. There are a few additional tidymodels design goals that complement those of the tidyverse. Some examples:
+
+-   R has excellent capabilities for object-oriented programming, and we use this in lieu of creating new function names (such as a hypothetical new `predict_samples()` function).
+
+-   *Sensible defaults* are very important. Also, functions should have no default for arguments when it is more appropriate to force the user to make a choice (e.g., the file name argument for `read_csv()`).
+
+-   Similarly, argument values whose default can be derived from the data should be. For example, for `glm()` the `family` argument could check the type of data in the outcome and, if no `family`was given, a default could be determined internally.
+
+-   Functions should take the *data structures that users have* as opposed to the data structure that developers want. For example, a model function’s only interface should not be constrained to matrices. Frequently, users will have non-numeric predictors such as factors.
+
+The `broom::tidy()` function is another tool for standardizing the structure of R objects. It can return many types of R objects in a more usable format.
+
+```{r}
+#| label: standardizing the structure of R objects
+corr_res <- map(mtcars |> select(-mpg), cor.test, y = mtcars$mpg)
+
+# The first of ten resulst in the vector:
+corr_res[[1]]
+```
+
+```{r}
+#| label: making tidy format of hypothesis test results
+
+tidy(corr_res[[1]])
+```
+
+```{r}
+#| label: plotting hypothesis test results
+
+corr_res |> 
+  # Convert each to a tidy format; `map_dfr()` stacks the data frames
+  map_dfr(tidy, .id = "predictor") |> 
+  ggplot(aes(x = fct_reorder(predictor, estimate))) +
+  geom_point(aes(y = estimate)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = .1) +
+  labs(x = NULL, y = "Correlation with mpg") +
+  theme_bw()
+```
+
+## 3.4 COMBINING BASE R MODELS AND THE TIDYVERSE
+
+```{r}
+#| label: divide the cricket data by the species
+
+split_by_species <- 
+  crickets |> 
+  group_nest(species)
+
+split_by_species
+```
+
+```{r}
+#| label: create individual models for each species
+
+model_by_species <- 
+  split_by_species |> 
+  mutate(model = map(data, ~ lm(rate ~ temp, data = .x)))
+
+model_by_species
+```
+
+```{r}
+#| label: collect coefficients for each of the models
+
+model_by_species |> 
+  mutate(coef = map(model, tidy)) |> 
+  select(species, coef) |> 
+  unnest(cols = c(coef))
+```
+
+## 3.5 THE TIDYMODELS METAPACKAGE
+
+-   The tidyverse (Chapter 2) is designed as a set of modular R packages, each with a fairly narrow scope.
+
+-   The tidymodels framework follows a similar design. For example, the **rsample** package focuses on data splitting and resampling.
+
+-   Although resampling methods are critical to other activities of modeling (e.g., measuring performance), they reside in a single package, and performance metrics are contained in a different, separate package, **yardstick**.
+
+-   There are many benefits to adopting this philosophy of modular packages, from less bloated model deployment to smoother package maintenance.
+
+-   Loading the metapackage also shows if there are function naming conflicts with previously loaded packages.
+
+-   There are a few ways to handle naming conflicts. The function can be called with its namespace (e.g., `stats::filter()`). This is not bad practice, but it does make the code less readable.
+
+-   Another option is to use the **conflicted** package. We can set a rule that remains in effect until the end of the R session to ensure that one specific function will always run if no namespace is given in the code. As an example, if we prefer the **dplyr** version of the previous function:
+
+```{r}
+#| label: managing conflicts with `conflict_prefer()` from conflicted package
+
+conflict_prefer("filter", winner = "dplyr")
+```
+
+For convenience, **tidymodels** contains a function that captures most of the common naming conflicts that we might encounter:
+
+```{r}
+#| label: viewing the preference of conflicts with `tidymodels_prefer()` from tidymodels package
+
+tidymodels_prefer(quiet = FALSE)
+```
