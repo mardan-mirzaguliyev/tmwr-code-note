@@ -31,3 +31,97 @@ date: 2024/12/03
 -   Global model explanations provide an overall understanding aggregated over a whole set of observations; local model explanations provide information about a prediction for a single observation.
 
 ## 18.1 SOFTWARE FOR MODEL EXPLANATIONS
+
+-   The tidymodels framework does not itself contain software for model explanations. Instead, models trained and evaluated with tidymodels can be explained with other, supplementary software in R packages such as **`lime`**, **`vip`**, and `DALEX`.
+
+-   We often choose:
+
+-   **`vip`** functions when we want to use *model-based* methods that take advantage of model structure (and are often faster)
+
+-   **`DALEX`** functions when we want to use *model-agnostic* methods that can be applied to any model
+
+-   In Chapters 10 and 11, we trained and compared several models to predict the price of homes in Ames, IA, including a linear model with interactions and a random forest model, with results shown in Figure 18.1.
+
+![](images/Screenshot 2024-12-03 at 23.23.06.png){width="365"}
+
+-   Let’s build model-agnostic explainers for both of these models to find out why they make these predictions.
+
+-   We can use the **`DALEXtra`** add-on package for **`DALEX`**, which provides support for `tidymodels`.
+
+-   Biecek and Burzykowski (2021) provide a thorough exploration of how to use **`DALEX`** for model explanations; this chapter only summarizes some important approaches, specific to `tidymodels`.
+
+-   To compute any kind of model explanation, global or local, using **DALEX**, we first prepare the appropriate data and then create an *explainer* for each model:
+
+```{r}
+#| label: load necessary packages
+
+library(DALEXtra)
+```
+
+```{r}
+#| label: define the features for model-agnostic explainer
+
+vip_features <- 
+  c("Neighborhood", "Gr_Liv_Area", "Year_Built", "Bldg_Type", 
+    "Latitude", "Longitude")
+
+vip_features
+```
+
+```{r}
+#| label: load necessary packages
+
+library(dplyr)
+```
+
+```{r}
+#| label: extraxting vip features from training data
+
+vip_train <- 
+  ames_train |> 
+  select(all_of(vip_features))
+
+vip_train
+```
+
+```{r}
+#| label: model-agnostic explainer: linear regression model
+
+explainer_lm <- 
+  explain_tidymodels(
+    lm_fit,
+    data = vip_train,
+    y = ames_train$Sale_Price,
+    label = "lm + interactions",
+    verbose = FALSE
+  )
+
+explainer_lm
+```
+
+```{r}
+#| label: model-agnostic explainer: random forest model
+
+explainer_rf <- 
+  explain_tidymodels(
+    rf_fit,
+    data = vip_train,
+    y = ames_train$Sale_Price,
+    label = "random forest",
+    verbose = FALSE
+  )
+
+explainer_rf
+```
+
+-   A linear model is typically straightforward to interpret and explain; you may not often find yourself using separate model explanation algorithms for a linear model.
+
+-   However, it can sometimes be difficult to understand or explain the predictions of even a linear model once it has splines and interaction terms!
+
+-   Dealing with significant feature engineering transformations during model explainability highlights some options we have (or sometimes, ambiguity in such analyses).
+
+-   We can quantify global or local model explanations either in terms of:
+
+    -   *original, basic predictors* as they existed without significant feature engineering transformations, or
+
+    -   *derived features*, such as those created via dimensionality reduction (Chapter 16) or interactions and spline terms, as in this example.
