@@ -319,7 +319,7 @@ ames_hash
 
 -   This is called a *collision* or *aliasing*. How often did this happen with our neighborhoods in Ames? Table 17.3 presents the distribution of number of neighborhoods per hash value.
 
-![](images/Screenshot 2024-12-02 at 22.44.19.png){width="284"}
+![](images/Screenshot%202024-12-02%20at%2022.44.19.png){width="302"}
 
 -   The number of neighborhoods mapped to each hash value varies between zero and four.
 
