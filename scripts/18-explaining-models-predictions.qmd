@@ -1,0 +1,33 @@
+---
+title: "Explaining Models and Predictions"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/12/03
+---
+
+# Explaining Models and Predictions
+
+-   In Section 1.2, we outlined a taxonomy of models and suggested that models typically are built as one or more of descriptive, inferential, or predictive.
+
+-   We suggested that model performance, as measured by appropriate metrics (like RMSE for regression or area under the ROC curve for classification), can be important for all modeling applications.
+
+-   Similarly, model explanations, answering *why* a model makes the predictions it does, can be important whether the purpose of your model is largely descriptive, to test a hypothesis, or to make a prediction.
+
+-   Answering the question “why?” allows modeling practitioners to understand which features were important in predictions and even how model predictions would change under different values for the features.
+
+-   This chapter covers how to ask a model why it makes the predictions it does.
+
+-   For some models, like linear regression, it is usually clear how to explain why the model makes its predictions.
+
+-   The structure of a linear model contains coefficients for each predictor that are typically straightforward to interpret.
+
+-   For other models, like random forests that can capture nonlinear behavior by design, it is less transparent how to explain the model’s predictions from only the structure of the model itself.
+
+-   Instead, we can apply model explainer algorithms to generate understanding of predictions.
+
+-   There are two types of model explanations, *global* and *local*.
+
+-   Global model explanations provide an overall understanding aggregated over a whole set of observations; local model explanations provide information about a prediction for a single observation.
+
+## 18.1 SOFTWARE FOR MODEL EXPLANATIONS
