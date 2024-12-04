@@ -42,7 +42,7 @@ date: 2024/12/03
 
 -   In Chapters 10 and 11, we trained and compared several models to predict the price of homes in Ames, IA, including a linear model with interactions and a random forest model, with results shown in Figure 18.1.
 
-![](images/Screenshot 2024-12-03 at 23.23.06.png){width="365"}
+![](images/Screenshot%202024-12-03%20at%2023.23.06.png){width="365"}
 
 -   Let’s build model-agnostic explainers for both of these models to find out why they make these predictions.
 
@@ -125,3 +125,56 @@ explainer_rf
     -   *original, basic predictors* as they existed without significant feature engineering transformations, or
 
     -   *derived features*, such as those created via dimensionality reduction (Chapter 16) or interactions and spline terms, as in this example.
+
+## 18.2 LOCAL EXPLANATIONS
+
+-   Local model explanations provide information about a prediction for a single observation.
+
+-   For example, let’s consider an older duplex in the North Ames neighborhood (Section 4.1):
+
+```{r}
+#| label: duplex building type in the North Ames neighborhood
+
+duplex <- vip_train[120, ]
+duplex
+```
+
+-   There are multiple possible approaches to understanding why a model predicts a given price for this duplex.
+
+-   One is a break-down explanation, implemented with the **`DALEX`** function `predict_parts()`; it computes how contributions attributed to individual features change the mean model’s prediction for a particular observation, like our duplex.
+
+-   For the linear model, the duplex status (`Bldg_Type = 3`), size, longitude, and age all contribute the most to the price being driven down from the intercept:
+
+```{r}
+#| label: breakdown explanation implemented with predict_parts() for the linear model
+
+lm_breakdown <- predict_parts(explainer = explainer_lm, new_observation = duplex)
+lm_breakdown
+```
+
+-   Since this linear model was trained using spline terms for latitude and longitude, the contribution to price for `Longitude` shown here combines the effects of all of its individual spline terms.
+
+-   The contribution is in terms of the original `Longitude` feature, not the derived spline features.
+
+-   The most important features are slightly different for the random forest model, with the size, age, and duplex status being most important:
+
+```{r}
+#| label: breakdown explanation implemented with predict_parts() for the random forest model
+
+rf_breakdown <- predict_parts(explainer = explainer_rf, new_observation = duplex)
+rf_breakdown
+```
+
+-   Model break-down explanations like these depend on the *order* of the features.
+
+-   If we choose the `order` for the random forest model explanation to be the same as the default for the linear model (chosen via a heuristic), we can change the relative importance of the features:
+
+```{r}
+#| label: changing the relative importance of the features
+
+predict_parts(
+  explainer = explainer_rf,
+  new_observation = duplex,
+  order = lm_breakdown$variable_name
+)
+```
