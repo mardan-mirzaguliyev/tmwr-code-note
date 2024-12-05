@@ -55,6 +55,7 @@ date: 2024/12/03
 ```{r}
 #| label: load necessary packages
 
+theme_set(theme_bw())
 library(DALEXtra)
 ```
 
@@ -178,3 +179,196 @@ predict_parts(
   order = lm_breakdown$variable_name
 )
 ```
+
+-   We can use the fact that these break-down explanations change based on order to compute the most important features over all (or many) possible orderings.
+
+-   This is the idea behind Shapley Additive Explanations (Lundberg and Lee 2017), where the average contributions of features are computed under different combinations or “coalitions” of feature orderings.
+
+-   Let’s compute SHAP attributions for our duplex, using `B = 20` random orderings:
+
+```{r}
+#| label: Shaply Additive Explainations for the duplex type in the North Ames neighborhood
+
+set.seed(1801)
+
+shap_duplex <- 
+  predict_parts(
+    explainer = explainer_rf,
+    new_observation = duplex,
+    type = "shap",
+    B = 20
+  )
+
+shap_duplex 
+```
+
+-   We could use the default plot method from **`DALEX`** by calling `plot(shap_duplex)`, or we can access the underlying data and create a custom plot.
+
+-   The box plots in Figure 18.2 display the distribution of contributions across all the orderings we tried, and the bars display the average attribution for each feature:
+
+```{r}
+#| label: load necessary packages
+
+library(forcats)
+```
+
+```{r}
+#| label: visualizing the distribution of contributions accross all the orderings (box plots) and the average attribution for each feature (bar plots) - a duplex property in the North Ames
+
+shap_duplex |> 
+  group_by(variable) |> 
+  mutate(mean_val = mean(contribution)) |> 
+  ungroup() |> 
+  mutate(variable = fct_reorder(variable, abs(mean_val))) |> 
+  ggplot(aes(contribution, variable, fill = mean_val > 0)) + 
+  geom_col(data = ~distinct(., variable, mean_val),
+           aes(mean_val, variable),
+           alpha = 0.5) +
+  geom_boxplot(width = 0.5) +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(y = NULL)
+```
+
+-   What about a different observation in our data set?
+
+-   Let’s look at a larger, newer one-family home in the Gilbert neighborhood:
+
+```{r}
+#| label: one-family home type in the Gilbert neighborhood
+
+big_house <- vip_train[1269, ]
+big_house
+```
+
+-   We can compute SHAP average attributions for this house in the same way:
+
+```{r}
+#| label: Shaply Additive Explainations for the duplex type in the Gilbert neighborhood
+
+set.seed(1802)
+
+shap_house <- 
+  predict_parts(
+    explainer = explainer_rf,
+    new_observation = big_house,
+    type = "shap",
+    B = 20
+  )
+
+shap_house
+```
+
+-   The results are shown in Figure 18.3; unlike the duplex, the size and age of this house contribute to its price being higher.
+
+```{r}
+#| label: visualizing the distribution of contributions accross all the orderings (box plots) and the average attribution for each feature (bar plots) - a one-family home in Gilbert
+
+shap_house |> 
+  group_by(variable) |> 
+  mutate(mean_val = mean(contribution)) |> 
+  ungroup() |> 
+  mutate(variable = fct_reorder(variable, abs(mean_val))) |> 
+  ggplot(aes(contribution, variable, fill = mean_val > 0)) + 
+  geom_col(data = ~distinct(., variable, mean_val),
+           aes(mean_val, variable),
+           alpha = 0.5) +
+  geom_boxplot(width = 0.5) +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(y = NULL)
+```
+
+## 18.3 GLOBAL EXPLANATIONS
+
+-   Global model explanations, also called global feature importance or variable importance, help us understand which features are most important in driving the predictions of the linear and random forest models overall, aggregated over the whole training set.
+
+-   While the previous section addressed which variables or features are most important in predicting sale price for an individual home, global feature importance addresses the most important variables for a model in aggregate.
+
+-   One way to compute variable importance is to *permute* the features (Breiman 2001a).
+
+-   We can permute or shuffle the values of a feature, predict from the model, and then measure how much worse the model fits the data compared to before shuffling.
+
+-   One way to compute variable importance is to *permute* the features (Breiman 2001a).
+
+-   We can permute or shuffle the values of a feature, predict from the model, and then measure how much worse the model fits the data compared to before shuffling.
+
+-   Using **`DALEX`**, we compute this kind of variable importance via the `model_parts()` function.
+
+```{r}
+#| label: global explainations via model_parts function for the linear regression model
+
+set.seed(1803)
+vip_lm <- model_parts(explainer_lm, loss_function = loss_root_mean_square)
+vip_lm
+```
+
+```{r}
+#| label: global explainations via model_parts function for the random forest model
+
+set.seed(1804)
+vip_rf <- model_parts(explainer_rf, loss_function = loss_root_mean_square)
+vip_rf
+```
+
+-   Again, we could use the default plot method from **DALEX** by calling `plot(vip_lm, vip_rf)` but the underlying data is available for exploration, analysis, and plotting.
+
+-   Let’s create a function for plotting:
+
+```{r}
+#| label: defining a function for visualizing global explanations
+
+ggplot_imp <- function(...) {
+  obj <- list(...)
+  metric_name <- attr(obj[[1]], "loss_name")
+  metric_lab <- paste(metric_name, 
+                      "after permutations\n(higher indicates more important)")
+  
+  full_vip <- bind_rows(obj) |> 
+    filter(variable != "_baseline_")
+  
+  
+  perm_vals <- full_vip |> 
+    filter(variable == "_full_model_") |> 
+    group_by(label) |> 
+    summarise(dropout_loss = mean(dropout_loss))
+  
+  p <- full_vip |> 
+    filter(variable != "_full_model_") |> 
+    mutate(variable = fct_reorder(variable, dropout_loss)) |> 
+    ggplot(aes(dropout_loss, variable))
+  
+  
+  if(length(obj) > 1) {
+    p <- p +
+      facet_wrap(vars(label)) +
+      geom_vline(data = perm_vals, aes(xintercept = dropout_loss, color = label),
+               linewidth = 1.4, lty = 2, alpha = 0.7) +
+      geom_boxplot(aes(color = label, fill = label), alpha = 0.2)
+  } else {
+     p <- p +
+       geom_vline(data = perm_vals, aes(xintercept = dropout_loss),
+                  linewidth = 1.4, lty = 2, alpha = 0.7) + 
+       geom_boxplot(fill = "#91CBD765", alpha = 0.4)
+  }  
+    
+  p +
+    theme(legend.position = "none") +
+    labs(x = metric_lab,
+         y = NULL, fill = NULL, color = NULL)
+}
+```
+
+-   Using `ggplot_imp(vip_lm, vip_rf)` produces Figure 18.4.
+
+```{r}
+#| label: visualizing the global explainer for the random forest and linear regression models via the defined function
+
+ggplot_imp(vip_lm, vip_rf)
+```
+
+-   he dashed line in each panel of Figure 18.4 shows the RMSE for the full model, either the linear model or the random forest model.
+
+-   Features farther to the right are more important, because permuting them results in higher RMSE.
+
+-   There is quite a lot of interesting information to learn from this plot; for example, neighborhood is quite important in the linear model with interactions/splines but the second least important feature for the random forest model.
