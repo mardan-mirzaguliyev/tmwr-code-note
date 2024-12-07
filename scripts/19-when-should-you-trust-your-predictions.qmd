@@ -7,3 +7,107 @@ date: 2024/12/07
 ---
 
 # When Should You Trust Your Predictions?
+
+-   A predictive model can almost always produce a prediction, given input data.
+
+-   However, in plenty of situations it is inappropriate to produce such a prediction.
+
+-   When a new data point is well outside of the range of data used to create the model, making a prediction may be an inappropriate *extrapolation*.
+
+-   A more qualitative example of an inappropriate prediction would be when the model is used in a completely different context.
+
+-   The cell segmentation data used in Chapter 14 flags when human breast cancer cells can or cannot be accurately isolated inside an image.
+
+-   A model built from these data could be inappropriately applied to stomach cells for the same purpose.
+
+-   We can produce a prediction but it is unlikely to be applicable to the different cell type.
+
+-   This chapter discusses two methods for quantifying the potential quality of a prediction:
+
+    -   *Equivocal zones* use the predicted values to alert the user that results may be suspect.
+
+    -   *Applicability* uses the predictors to measure the amount of extrapolation (if any) for new samples.
+
+## 19.1 EQUIVOCAL RESULTS
+
+-   In some cases, the amount of uncertainty associated with a prediction is too high to be trusted.
+
+-   If a model result indicated that you had a 51% chance of having contracted COVID-19, it would be natural to view the diagnosis with some skepticism.
+
+-   In fact, regulatory bodies often require many medical diagnostics to have an *equivocal zone*.
+
+-   This zone is a range of results in which the prediction should not be reported to patients, for example, some range of COVID-19 test results that are too uncertain to be reported to a patient.
+
+-   See Danowski et al. (1970) and Kerleguer et al. (2003) for examples.
+
+-   The same notion can be applied to models created outside of medical diagnostics.
+
+-   Let’s use a function that can simulate classification data with two classes and two predictors (`x` and `y`).
+
+-   The true model is a logistic regression model with the equation:
+
+$$
+\mathrm{logit}(p) = -1 - 2x - \frac{x^2}{5} + 2y^2
+$$
+
+-   The two predictors follow a bivariate normal distribution with a correlation of 0.70. We’ll create a training set of 200 samples and a test set of 50:
+
+```{r}
+#| label: load necessary packages, set the theme
+
+library(tidymodels)
+library(ggplot2)
+tidymodels_prefer()
+theme_set(theme_bw())
+```
+
+```{r}
+#| label: define a function to simulate classes
+
+simulate_two_classes <- 
+  function(n, error = 0.1, eqn = quote(-1 - 2 * x - 0.2 * x^2 + 2 * y^2)) {
+    # Slighly correlated predictors
+    sigma <- matrix(c(1, 0.7, 0.7, 1), nrow = 2, ncol = 2)
+    dat <- MASS::mvrnorm(n = n, mu = c(0, 0), Sigma = sigma)
+    colnames(dat) <- c("x", "y")
+    cls <- paste0("class_", 1:2)
+    dat <- 
+      as_tibble(dat) |> 
+      mutate(
+        linear_pred = !!eqn,
+        # Add some misclassification noise
+        linear_pred = linear_pred + rnorm(n, sd = error),
+        prob = binomial()$linkinv(linear_pred),
+        class = ifelse(prob > runif(n), cls[1], cls[2]),
+        class = factor(class, levels = cls)
+      )
+    dplyr::select(dat, x, y, class)
+  }
+```
+
+```{r}
+#| label: use the function to build the training set
+
+training_set <- simulate_two_classes(200)
+training_set
+```
+
+```{r}
+#| label: use the function to build the test data set
+
+testing_set <- simulate_two_classes(50)
+testing_set
+```
+
+-   We estimate a logistic regression model using Bayesian methods (using the default Gaussian prior distributions for the parameters):
+
+```{r}
+#| label: training the model
+
+two_class_mod <- 
+  logistic_reg() |> 
+  set_engine("stan", seed = 1902) |> 
+  fit(class ~ . + I(x^2) + I(y^2), data = training_set)
+
+two_class_mod
+```
