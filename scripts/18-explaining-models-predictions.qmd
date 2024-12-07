@@ -475,7 +475,7 @@ We have the option of using `plot(pdp_liv)` for default **`DALEX`** plots, but s
 
 as_tibble(pdp_liv$agr_profiles) |> 
   mutate(Bldg_Type = stringr::str_remove(`_label_`, "random_forest_")) |> 
-  ggplot(aes("_x_", "_yhat_", color = Bldg_Type)) +
+  ggplot(aes(`_x_`, `_yhat_`, color = Bldg_Type)) +
   geom_line(data = as_tibble(pdp_liv$cp_profiles),
             aes(x = Gr_Liv_Area, group = `_ids_`),
             linewidth = 0.5, alpha = 0.1, color = "gray50") +
@@ -493,3 +493,43 @@ as_tibble(pdp_liv$agr_profiles) |>
 -   We have highlighted good options for explanations at both the individual and global level, as well as how to bridge from one to the other, and we point you to Biecek and Burzykowski (2021) and Molnar (2020) for further reading.
 
 ## 18.5 BACK TO BEANS!
+
+-   In Chapter 16, we discussed how to use dimensionality reduction as a feature engineering or preprocessing step when modeling high-dimensional data.
+
+-   For our example data set of dry bean morphology measures predicting bean type, we saw great results from partial least squares (PLS) dimensionality reduction combined with a regularized discriminant analysis model.
+
+-   Which of those morphological characteristics were *most* important in the bean type predictions?
+
+-   We can use the same approach outlined throughout this chapter to create a model-agnostic explainer and compute, say, global model explanations via `model_parts()`:
+
+```{r}
+#| label: creating a model-agnostic explainer for bean classification model and computing global model explanations
+
+set.seed(1807)
+
+vip_beans <- 
+  explain_tidymodels(
+    rda_wflow_fit,
+    data = bean_train |> select(-class),
+    y = bean_train$class,
+    label = "RDA",
+    verbose = FALSE
+  ) |> 
+  model_parts()
+```
+
+-   Using our previously defined importance plotting function, `ggplot_imp(vip_beans)` produces Figure 18.8.
+
+```{r}
+#| label: visualizing Global explainer for the regularized discriminant analysis model on the beans data
+
+ggplot_imp(vip_beans)
+```
+
+-   The measures of global feature importance that we see in Figure 18.8 incorporate the effects of all of the PLS components, but in terms of the original variables.
+
+-   Figure 18.8 shows us that shape factors are among the most important features for predicting bean type, especially shape factor 4, a measure of solidity that takes into account the area $A$ major axis $L$ and minor axis $l$:
+
+$$\text{SF4} = \frac{A}{\pi(L/2)(l/2)}$$
+
+-   We can see from Figure 18.8 that shape factor 1 (the ratio of the major axis to the area), the minor axis length, and roundness are the next most important bean characteristics for predicting bean variety.
