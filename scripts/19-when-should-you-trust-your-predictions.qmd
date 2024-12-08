@@ -111,3 +111,162 @@ two_class_mod <-
 
 two_class_mod
 ```
+
+The fitted class boundary is overlaid onto the test set in Figure 19.1.
+
+-   The data points closest to the class boundary are the most uncertain. If their values changed slightly, their predicted class might change.
+
+-   One simple method for disqualifying some results is to call them “equivocal” if the values are within some range around 50% (or the appropriate probability cutoff for a certain situation).
+
+-   Depending on the problem the model is being applied to, this might indicate we should collect another measurement or we require more information before a trustworthy prediction is possible.
+
+![](images/Screenshot 2024-12-08 at 11.02.18.png){width="360"}
+
+-   We could base the width of the band around the cutoff on how performance improves when the uncertain results are removed.
+
+-   However, we should also estimate the reportable rate (the expected proportion of usable results).
+
+-   For example, it would not be useful in real-world situations to have perfect performance but release predictions on only 2% of the samples passed to the model.
+
+-   Let’s use the test set to determine the balance between improving performance and having enough reportable results.
+
+-   The predictions are created using:
+
+```{r}
+#| label: making predictions with two class training data set
+
+test_pred <- augment(two_class_mod, testing_set)
+
+test_pred |> head()
+```
+
+-   With tidymodels, the **`probably`** package contains functions for equivocal zones.
+
+-   For cases with two classes, the `make_two_class_pred()` function creates a factor-like column that has the predicted classes with an equivocal zone:
+
+```{r}
+#| label: load necessary packages
+
+library(probably)
+```
+
+```{r}
+#| label: make. predictions with equivocal zone
+
+lvls <- levels(training_set$class)
+
+test_pred <- 
+  test_pred |> 
+  mutate(.pred_with_eqz = make_two_class_pred(.pred_class_1, lvls, buffer = 0.15))
+
+test_pred |> count(.pred_with_eqz)
+```
+
+-   Rows that are within $0.50\pm0.15$ are given a value of `[EQ]`.
+
+-   The notation `[EQ]` in this example is not a factor level but an attribute of that column.
+
+-   Since the factor levels are the same as the original data, confusion matrices and other statistics can be computed without error.
+
+-   When using standard functions from the **`yardstick`** package, the equivocal results are converted to `NA` and are not used in the calculations that use the hard class predictions.
+
+-   Notice the differences in these confusion matrices:
+
+```{r}
+#| label: confusion matrix for the all data
+
+test_pred |> conf_mat(class, .pred_class)
+```
+
+```{r}
+#| label: confusion matrix for reportable results only
+
+test_pred |> conf_mat(class, .pred_with_eqz)
+```
+
+-   An `is_equivocal()` function is also available for filtering these rows from the data.
+
+-   Does the equivocal zone help improve accuracy?
+
+-   Let’s look at different buffer sizes, as shown in Figure 19.2:
+
+```{r}
+#| label: defining a function to change the buffer then compute performance
+
+eq_zone_results <- function(buffer) {
+  test_pred <- 
+    test_pred |> 
+    mutate(.pred_with_eqz = make_two_class_pred(.pred_class_1, lvls, buffer = buffer))
+  
+  acc <- test_pred |> accuracy(class, .pred_with_eqz)
+  rep_rate <- reportable_rate(test_pred$.pred_with_eqz)
+  tibble(axxuracy = acc$.estimate, reportable = rep_rate, buffer = buffer)
+}
+```
+
+```{r}
+#| label: Evaluate a sequence of buffers
+
+map(seq(0, .1, length.out = 40), eq_zone_results) |> 
+  list_rbind() |> 
+  pivot_longer(c(-buffer), names_to = "statistic", values_to = "value")
+```
+
+```{r}
+#| label: Plot the results of the effect of equivocal zones on model performance
+
+map(seq(0, .1, length.out = 40), eq_zone_results) |> 
+  list_rbind() |> 
+  pivot_longer(c(-buffer), names_to = "statistic", values_to = "value") |> 
+  ggplot(aes(x = buffer, y = value, lty = statistic)) +
+  geom_step(linewidth = 1.2, alpha = 0.8) +
+  labs(y = NULL, lty = NULL)
+```
+
+-   Figure 19.2 shows us that accuracy improves by a few percentage points but at the cost of nearly 10% of predictions being unusable!
+
+-   The value of such a compromise depends on how the model predictions will be used.
+
+-   This analysis focused on using the predicted class probability to disqualify points, since this is a fundamental measure of uncertainty in classification models.
+
+-   A slightly better approach would be to use the standard error of the class probability. Since we used a Bayesian model, the probability estimates we found are actually the mean of the posterior predictive distribution.
+
+-   In other words, the Bayesian model gives us a distribution for the class probability. Measuring the standard deviation of this distribution gives us a s*tandard error of prediction* of the probability.
+
+-   In most cases, this value is directly related to the mean class probability. You might recall that, for a Bernoulli random variable with probability $p$, the variance is $p(p-1)$.
+
+-   Because of this relationship, the standard error is largest when the probability is 50%.
+
+-   Instead of assigning an equivocal result using the class probability, we could instead use a cutoff on the standard error of prediction.
+
+-   One important aspect of the standard error of prediction is that it takes into account more than just the class probability.
+
+-   In cases where there is significant extrapolation or aberrant predictor values, the standard error might increase.
+
+-   The benefit of using the standard error of prediction is that it might also flag predictions that are problematic (as opposed to simply uncertain).
+
+-   One reason we used the Bayesian model is that it naturally estimates the standard error of prediction; not many models can calculate this.
+
+-   For our test set, using `type = "pred_int"` will produce upper and lower limits and the `std_error` adds a column for that quantity.
+
+-   For 80% intervals:
+
+```{r}
+#| label: adding a column for the standard error
+
+test_pred <- 
+  test_pred |> 
+  bind_cols(
+    predict(two_class_mod, testing_set, type = "pred_int", std_error = TRUE)
+  )
+
+test_pred
+```
+
+-   For our example where the model and data are well behaved, Figure 19.3 shows the standard error of prediction across the space:
+
+![](images/Screenshot 2024-12-08 at 12.18.37.png){width="282"}
+
+-   Using the standard error as a measure to preclude samples from being predicted can also be applied to models with numeric outcomes.
+
+-   However, as shown in the next section, this may not always work.
