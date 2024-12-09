@@ -120,7 +120,7 @@ The fitted class boundary is overlaid onto the test set in Figure 19.1.
 
 -   Depending on the problem the model is being applied to, this might indicate we should collect another measurement or we require more information before a trustworthy prediction is possible.
 
-![](images/Screenshot 2024-12-08 at 11.02.18.png){width="360"}
+![](images/Screenshot%202024-12-08%20at%2011.02.18.png){width="360"}
 
 -   We could base the width of the band around the cutoff on how performance improves when the uncertain results are removed.
 
@@ -265,8 +265,173 @@ test_pred
 
 -   For our example where the model and data are well behaved, Figure 19.3 shows the standard error of prediction across the space:
 
-![](images/Screenshot 2024-12-08 at 12.18.37.png){width="282"}
+![](images/Screenshot%202024-12-08%20at%2012.18.37.png){width="282"}
 
 -   Using the standard error as a measure to preclude samples from being predicted can also be applied to models with numeric outcomes.
 
 -   However, as shown in the next section, this may not always work.
+
+## 19.2 DETERMINING MODEL APPLICABILITY
+
+-   Equivocal zones try to measure the reliability of a prediction based on the model outputs.
+
+-   It may be that model statistics, such as the standard error of prediction, cannot measure the impact of extrapolation, and so we need another way to assess whether to trust a prediction and answer, “Is our model applicable for predicting a specific data point?”
+
+-   Let’s take the Chicago train data used extensively in Kuhn and Johnson (2019) and first shown in Section 2.2.
+
+-   The goal is to predict the number of customers entering the Clark and Lake train station each day.
+
+-   The data set in the **`modeldata`** package (a tidymodels package with example data sets) has daily values between January 22, 2001 and August 28, 2016.
+
+-   Let’s create a small test set using the last two weeks of the data:
+
+```{r}
+#| labal: loading both `Chicago` data set as well as `stations`
+
+data("Chicago")
+
+Chicago <- Chicago |> select(ridership, date, one_of(stations))
+
+head(Chicago)
+```
+
+```{r}
+#| label: detect the number of rows for training and test set devision
+
+n <- nrow(Chicago)
+n
+```
+
+```{r}
+#| label: define training data set
+
+Chicago_train <- Chicago |> slice(1:(n - 14))
+nrow(Chicago_train)
+```
+
+```{r}
+#| label: define testing data set
+
+Chicago_test <- Chicago |> slice((n - 13):n)
+nrow(Chicago_test)
+```
+
+-   The main predictors are lagged ridership data at different train stations, including Clark and Lake, as well as the date.
+
+-   The ridership predictors are highly correlated with one another.
+
+-   In the following recipe, the date column is expanded into several new features, and the ridership predictors are represented using partial least squares (PLS) components.
+
+-   PLS (Geladi and Kowalski 1986), as we discussed in Section 16.5.2, is a supervised version of principal component analysis where the new features have been decorrelated but are predictive of the outcome data.
+
+-   Using the preprocessed data, we fit a standard linear model:
+
+```{r}
+#| label: building a recipe
+
+base_recipe <- 
+  recipe(ridership ~ ., data = Chicago_train) |> 
+  # Create date features
+  step_date(date) |> 
+  step_holiday(date, keep_original_cols = FALSE) |> 
+  # Create dummy variables from factor columns
+  step_dummy(all_nominal()) |> 
+  # Remove any columns with a single unique value
+  step_zv(all_predictors()) |> 
+  step_normalize(!!!stations) |> 
+  step_pls(!!!stations, num_comp = 10, outcome = vars(ridership))
+
+base_recipe
+```
+
+```{r}
+#| label: model specification and workflow
+
+lm_spec <- 
+  linear_reg() |> 
+  set_engine("lm")
+
+lm_wflow <- 
+  workflow() |> 
+  add_recipe(base_recipe) |> 
+  add_model(lm_spec)
+
+lm_wflow
+```
+
+```{r}
+#| label: model fitting
+
+set.seed(1902)
+
+lm_fit <- fit(lm_wflow, data = Chicago_train)
+lm_fit
+```
+
+-   How well do the data fit on the test set? We can `predict()` for the test set to find both predictions and prediction intervals:
+
+```{r}
+#| label: making predictions
+
+res_test <- 
+  predict(lm_fit, Chicago_test) |> 
+  bind_cols(
+    predict(lm_fit, Chicago_test, type = "pred_int"), 
+    Chicago_test
+  )
+
+res_test |> select(date, ridership, starts_with(".pred"))
+```
+
+```{r}
+#| label: Check Root Mean Squared Error
+
+res_test |> rmse(ridership, .pred)
+```
+
+-   These are fairly good results. Figure 19.4 visualizes the predictions along with 95% prediction intervals.
+
+![](images/Screenshot 2024-12-09 at 22.59.10.png){width="275"}
+
+-   Given the scale of the ridership numbers, these results look particularly good for such a simple model.
+
+-   If this model were deployed, how well would it have done a few years later in June 2020? The model successfully makes a prediction, as a predictive model almost always will when given input data:
+
+```{r}
+#| label: predictions for the June, 2020 data
+
+res_2020 <- 
+  predict(lm_fit, Chicago_2020) |> 
+  bind_cols(
+    predict(lm_fit, Chicago_2020, type = "pred_int"),
+    Chicago_2020
+  )
+
+res_2020 |> select(date, contains(".pred"))
+```
+
+-   The prediction intervals are about the same width, even though these data are well beyond the time period of the original training set.
+
+-   However, given the global pandemic in 2020, the performance on these data are abysmal:
+
+```{r}
+#| label: check the performance for the 2020 predictions
+
+res_2020 |> select(date, ridership, starts_with(".pred"))
+```
+
+```{r}
+#| label: Check Root Mean Squared Error for 2020 predictions
+
+res_2020 |> rmse(ridership, .pred)
+```
+
+-   You can see this terrible model performance visually in Figure 19.5.
+
+![](images/Screenshot 2024-12-09 at 23.23.44.png){width="416"}
+
+-   Confidence and prediction intervals for linear regression expand as the data become more and more removed from the center of the training set.
+
+-   However, that effect is not dramatic enough to flag these predictions as being poor.
+
+-   Sometimes the statistics produced by models don’t measure the quality of predictions very well.
