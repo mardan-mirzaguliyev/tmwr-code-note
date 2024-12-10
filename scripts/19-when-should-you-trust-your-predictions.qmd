@@ -286,7 +286,7 @@ test_pred
 -   Let’s create a small test set using the last two weeks of the data:
 
 ```{r}
-#| labal: loading both `Chicago` data set as well as `stations`
+#| label: loading both `Chicago` data set as well as `stations`
 
 data("Chicago")
 
@@ -391,7 +391,7 @@ res_test |> rmse(ridership, .pred)
 
 -   These are fairly good results. Figure 19.4 visualizes the predictions along with 95% prediction intervals.
 
-![](images/Screenshot 2024-12-09 at 22.59.10.png){width="275"}
+![](images/Screenshot%202024-12-09%20at%2022.59.10.png){width="275"}
 
 -   Given the scale of the ridership numbers, these results look particularly good for such a simple model.
 
@@ -428,10 +428,44 @@ res_2020 |> rmse(ridership, .pred)
 
 -   You can see this terrible model performance visually in Figure 19.5.
 
-![](images/Screenshot 2024-12-09 at 23.23.44.png){width="416"}
+![](images/Screenshot%202024-12-09%20at%2023.23.44.png){width="416"}
 
 -   Confidence and prediction intervals for linear regression expand as the data become more and more removed from the center of the training set.
 
 -   However, that effect is not dramatic enough to flag these predictions as being poor.
 
 -   Sometimes the statistics produced by models don’t measure the quality of predictions very well.
+
+-   This situation can be avoided by having a secondary methodology that can quantify how applicable the model is for any new prediction (i.e., the model’s *applicability domain*).
+
+-   There are a variety of methods to compute an applicability domain model, such as Jaworska, Nikolova-Jeliazkova, and Aldenberg (2005) or Netzeva et al. (2005).
+
+-   The approach used in this chapter is a fairly simple unsupervised method that attempts to measure how much (if any) a new data point is beyond the training data.
+
+-   The idea is to accompany a prediction with a score that measures how similar the new point is to the training set.
+
+-   One method that works well uses principal component analysis (PCA) on the numeric predictor values.
+
+-   We’ll illustrate the process by using only two of the predictors that correspond to ridership at different stations (California and Austin stations).
+
+-   The training set are shown in panel (a) in Figure 19.6.
+
+-   The ridership data for these stations are highly correlated, and the two distributions shown in the scatter plot correspond to ridership on the weekends and week days.
+
+    The first step is to conduct PCA on the training data.
+
+-   The PCA scores for the training set are shown in panel (b) in Figure 19.6.
+
+-   Next, using these results, we measure the distance of each training set point to the center of the PCA data (panel (c) of Figure 19.6).
+
+-   We can then use this *reference distribution*(panel (d) of Figure 19.6) to estimate how far a data point is from the mainstream of the training data.
+
+    ![](images/Screenshot 2024-12-10 at 23.45.42.png){width="283"}
+
+-   One approach is to treat the distances from the training set data as “normal.”
+
+-   For new samples, we can determine how the new distance compares to the range in the reference distribution (from the training set).
+
+-   A percentile can be computed for new samples that reflect how much of the training set is less extreme than the new samples.
+
+-   A percentile of 90% means that most of the training set data are closer to the data center than the new sample.
