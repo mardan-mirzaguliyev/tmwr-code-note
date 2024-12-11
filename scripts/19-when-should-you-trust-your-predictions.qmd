@@ -460,7 +460,7 @@ res_2020 |> rmse(ridership, .pred)
 
 -   We can then use this *reference distribution*(panel (d) of Figure 19.6) to estimate how far a data point is from the mainstream of the training data.
 
-    ![](images/Screenshot 2024-12-10 at 23.45.42.png){width="283"}
+    ![](images/Screenshot%202024-12-10%20at%2023.45.42.png){width="283"}
 
 -   One approach is to treat the distances from the training set data as “normal.”
 
@@ -469,3 +469,84 @@ res_2020 |> rmse(ridership, .pred)
 -   A percentile can be computed for new samples that reflect how much of the training set is less extreme than the new samples.
 
 -   A percentile of 90% means that most of the training set data are closer to the data center than the new sample.
+
+-   The plot in Figure 19.7 overlays a testing set sample (triangle and dashed line) and a 2020 sample (circle and solid line) with the PCA distances from the training set.
+
+![](images/Screenshot 2024-12-11 at 23.10.03.png){width="393"}
+
+-   The test set point has a distance of 1.28.
+
+-   It is in the 51.8% percentile of the training set distribution, indicating that it is snugly within the mainstream of the training set.
+
+-   The 2020 sample is farther from the center than any of the training set samples (with a percentile of 100%).
+
+-   This indicates the sample is very extreme and that its corresponding prediction would be a severe extrapolation (and probably should not be reported).
+
+-   The **`applicable`** package can develop an applicability domain model using PCA.
+
+-   We’ll use the 20 lagged station ridership predictors as inputs into the PCA analysis.
+
+-   There is an additional argument called `threshold` that determines how many components are used in the distance calculation.
+
+-   For our example, we’ll use a large value that indicates we should use enough components to account for 99% of the variation in the ridership predictors:
+
+```{r}
+#| label: load necessary packages
+
+library(applicable)
+```
+
+```{r}
+#| label: building an applicability domain model
+
+pca_stat <- apd_pca(~ ., 
+                    data = Chicago_train |> select(one_of(stations)),
+                    threshold = 0.99)
+pca_stat
+```
+
+-   The `autoplot()` method plots the reference distribution.
+
+-   It has an optional argument for which data to plot.
+
+-   We’ll add a value of `distance` to plot only the training set distance distribution.
+
+-   This code generates the plot in Figure 19.8:
+
+```{r}
+#| label: visualizing the results
+
+autoplot(pca_stat, distance) + labs(x = "distance")
+```
+
+-   The x-axis shows the values of the distance and the y-axis displays the distribution’s percentiles. For example, half of the training set samples had distances less than 3.7.
+
+-   To compute the percentiles for new data, the `score()` function works in the same way as `predict()`:
+
+```{r}
+#| label: computing the percentiles for testing data: score() function has the same functionality as predict()
+
+score(pca_stat, Chicago_test) |> select(starts_with("distance"))
+```
+
+-   These seem fairly reasonable. For the 2020 data:
+
+```{r}
+#| label: computing the percentiles for 2020 data
+
+score(pca_stat, Chicago_2020) |> select(starts_with("distance"))
+```
+
+-   The 2020 distance values indicate that these predictor values are outside of the vast majority of data seen by the model at training time.
+
+-   These should be flagged so that the predictions are either not reported at all or viewed with skepticism.
+
+-   One important aspect of this analysis concerns which predictors are used to develop the applicability domain model.
+
+-   In our analysis, we used the raw predictor columns. However, in building the model, PLS score features were used in their place.
+
+-   Which of these should `apd_pca()` use?
+
+-   The `apd_pca()` function can also take a recipe as the input (instead of a formula) so that the distances reflect the PLS scores instead of the individual predictor columns.
+
+-   You can evaluate both methods to understand which one gives more relevant results.
