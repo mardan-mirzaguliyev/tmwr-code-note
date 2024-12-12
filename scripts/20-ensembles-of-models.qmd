@@ -1,0 +1,59 @@
+---
+title: "Ensembles of Models"
+author: "Mardan Mirzəquliyev"
+format: html
+editor: visual
+date: 2024/12/12
+---
+
+# Ensembles of Models
+
+-   A model ensemble, where the predictions of multiple single learners are aggregated to make one prediction, can produce a high-performance final model.
+
+-   The most popular methods for creating ensemble models are bagging (Breiman 1996a), random forest (Ho 1995; Breiman 2001a), and boosting (Freund and Schapire 1997).
+
+-   Each of these methods combines the predictions from multiple versions of the same type of model (e.g., classifications trees).
+
+-   However, one of the earliest methods for creating ensembles is *model stacking* (Wolpert 1992; Breiman 1996b).
+
+-   Model stacking combines the predictions for multiple models of any type.
+
+-   For example, a logistic regression, classification tree, and support vector machine can be included in a stacking ensemble.
+
+-   This chapter shows how to stack predictive models using the **`stacks`** package.
+
+-   We’ll re-use the results from Chapter 15 where multiple models were evaluated to predict the compressive strength of concrete mixtures.
+
+-   The process of building a stacked ensemble is:
+
+    1.  Assemble the training set of hold-out predictions (produced via resampling).
+
+    2.  Create a model to blend these predictions.
+
+    3.  For each member of the ensemble, fit the model on the original training set.
+
+-   In subsequent sections, we’ll describe this process.
+
+-   However, before proceeding, we’ll clarify some nomenclature for the variations of what “the model” can mean.
+
+-   This can quickly become an overloaded term when we are working on a complex modeling analysis!
+
+-   Let’s consider the multilayer perceptron (MLP) model (a.k.a. neural network) created in Chapter 15.
+
+    In general, we’ll talk about an MLP model as the *type* of model.
+
+-   Linear regression and support vector machines are other model types.
+
+-   Tuning parameters are an important aspect of a model.
+
+-   Back in Chapter 15, the MLP model was tuned over 25 tuning parameter values.
+
+-   In the previous chapters, we’ve called these *candidate tuning parameter* values or *model configurations*.
+
+-   In literature on ensembling these have also been called the base models.
+
+-   We’ll use the term *candidate members* to describe the possible model configurations (of all model types) that might be included in the stacking ensemble.
+
+-   This means that a stacking model can include different types of models (e.g., trees and neural networks) as well as different configurations of the same model (e.g., trees with different depths).
+
+## 20.1 CREATING THE TRAINING SET FOR STACKING
