@@ -57,3 +57,91 @@ date: 2024/12/12
 -   This means that a stacking model can include different types of models (e.g., trees and neural networks) as well as different configurations of the same model (e.g., trees with different depths).
 
 ## 20.1 CREATING THE TRAINING SET FOR STACKING
+
+-   The first step for building a stacked ensemble relies on the assessment set predictions from a resampling scheme with multiple splits.
+
+-   For each data point in the training set, stacking requires an out-of-sample prediction of some sort.
+
+-   For regression models, this is the predicted outcome.
+
+-   For classification models, the predicted classes or probabilities are available for use, although the latter contains more information than the hard class predictions.
+
+-   For a set of models, a data set is assembled where rows are the training set samples and columns are the out-of-sample predictions from the set of multiple models.
+
+-   Back in Chapter 15, we used five repeats of 10-fold cross-validation to resample the data.
+
+-   This resampling scheme generates five assessment set predictions for each training set sample.
+
+-   Multiple out-of-sample predictions can occur in several other resampling techniques (e.g., bootstrapping).
+
+-   For the purpose of stacking, any replicate predictions for a data point in the training set are averaged so that there is a single prediction per training set sample per candidate member.
+
+-   Simple validation sets can also be used with stacking since `tidymodels` considers this to be a single resample.
+
+-   For the concrete example, the training set used for model stacking has columns for all of the candidate tuning parameter results.
+
+-   Table 20.1 presents the first six rows and selected columns.
+
+![](images/Screenshot 2024-12-13 at 22.57.42.png){width="339"}
+
+-   There is a single column for the bagged tree model since it has no tuning parameters.
+
+-   Also, recall that MARS was tuned over a single parameter (the product degree) with two possible configurations, so this model is represented by two columns.
+
+-   Most of the other models have 25 corresponding columns, as shown for Cubist in this example.
+
+-   For classification models, the candidate prediction columns would be predicted class probabilities.
+
+-   Since these columns add to one for each model, the probabilities for one of the classes can be left out.
+
+-   For classification models, the candidate prediction columns would be predicted class probabilities.
+
+-   Since these columns add to one for each model, the probabilities for one of the classes can be left out.
+
+-   To start ensembling with the **`stacks`** package, create an empty data stack using the `stacks()` function and then add candidate models.
+
+-   Recall that we used workflow sets to fit a wide variety of models to these data.
+
+-   We’ll use the racing results:
+
+```{r}
+#| label: workflow set of models
+
+race_results
+```
+
+-   In this case, our syntax is:
+
+```{r}
+#| label: load necessary packages
+
+library(tidymodels)
+library(stacks)
+tidymodels_prefer()
+```
+
+```{r}
+#| label: building a stack for the concrete data models
+
+concrete_stack <- 
+  stacks() |> 
+  add_candidates(race_results)
+
+concrete_stack
+```
+
+-   Recall that racing methods (Section 13.5.5) are more efficient since they might not evaluate all configurations on all resamples.
+
+-   Stacking requires that all candidate members have the complete set of resamples.
+
+-   `add_candidates()` includes only the model configurations that have complete results.
+
+-   Why use the racing results instead of the full set of candidate models contained in `grid_results`?
+
+-   Either can be used. We found better performance for these data using the racing results.
+
+-   This might be due to the racing method pre-selecting the best model(s) from the larger grid.
+
+-   If we had not used the **workflowsets** package, objects from the **`tune`** and **`finetune`** could also be passed to `add_candidates()`.
+
+-   This can include both grid and iterative search objects.
