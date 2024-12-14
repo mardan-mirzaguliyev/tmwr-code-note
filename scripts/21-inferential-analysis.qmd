@@ -1,0 +1,9 @@
+---
+title: "Inferential Analysis"
+author: "Mardan Mirzaguliyev"
+format: html
+editor: visual
+date: 2024/12/14
+---
+
+# Inferential Analysis
