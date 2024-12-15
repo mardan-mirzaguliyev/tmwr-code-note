@@ -7,3 +7,190 @@ date: 2024/12/14
 ---
 
 # Inferential Analysis
+
+-   In Section 1.2, we outlined a taxonomy of models and said that most models can be categorized as descriptive, inferential, and/or predictive.
+
+-   Most of the chapters in this book have focused on models from the perspective of the accuracy of predicted values, an important quality of models for all purposes but most relevant for predictive models.
+
+-   Inferential models are usually created not only for their predictions, but also to make inferences or judgments about some component of the model, such as a coefficient value or other parameter.
+
+-   These results are often used to answer some (hopefully) pre-defined questions or hypotheses.
+
+-   In predictive models, predictions on hold-out data are used to validate or characterize the quality of the model. Inferential methods focus on validating the probabilistic or structural assumptions that are made prior to fitting the model.
+
+-   For example, in ordinary linear regression, the common assumption is that the residual values are independent and follow a Gaussian distribution with a constant variance.
+
+-   While you may have scientific or domain knowledge to lend credence to this assumption for your model analysis, the residuals from the fitted model are usually examined to determine if the assumption was a good idea.
+
+-   As a result, the methods for determining if the model’s assumptions have been met are not as simple as looking at holdout predictions, although that can be very useful as well.
+
+    We will use p-values in this chapter.
+
+-   However, the tidymodels framework tends to promote confidence intervals over p-values as a method for quantifying the evidence for an alternative hypothesis.
+
+-   As previously shown in Section 11.4, Bayesian methods are often superior to both p-values and confidence intervals in terms of ease of interpretation (but they can be more computationally expensive).
+
+-   In this chapter, we describe how to use **`tidymodels`** for fitting and assessing inferential models.
+
+-   In some cases, the `tidymodels` framework can help users work with the objects produced by their models.
+
+-   In others, it can help assess the quality of a given model.
+
+## 21.1 INFERENCE FOR COUNT DATA
+
+-   To understand how `tidymodels` packages can be used for inferential modeling, let’s focus on an example with count data.
+
+-   We’ll use biochemistry publication data from the **pscl** package.
+
+-   These data consist of information on 915 Ph.D. biochemistry graduates and tries to explain factors that impact their academic productivity (measured via number or count of articles published within three years).
+
+-   The predictors include the gender of the graduate, their marital status, the number of children of the graduate that are at least five years old, the prestige of their department, and the number of articles produced by their mentor in the same time period.
+
+-   The data reflect biochemistry doctorates who finished their education between 1956 and 1963.
+
+-   The data are a somewhat biased sample of all of the biochemistry doctorates given during this period (based on completeness of information).
+
+-   Recall that in Chapter 19 we asked the question “Is our model applicable for predicting a specific data point?”
+
+-   It is very important to define what populations an inferential analysis applies to.
+
+-   For these data, the results would likely apply to biochemistry doctorates given around the time frame that the data were collected.
+
+-   Does it also apply to other chemistry doctorate types (e.g., medicinal chemistry, etc)?
+
+-   These are important questions to address (and document) when conducting inferential analyses.
+
+-   A plot of the data shown in Figure 21.1 indicates that many graduates did not publish any articles in this time and that the outcome follows a right-skewed distribution:
+
+```{r}
+#| label: load necessary packages
+
+library(tidymodels)
+tidymodels_prefer()
+theme_set(theme_bw())
+```
+
+```{r}
+#| label: load and visualize the data
+
+data("bioChemists", package = "pscl")
+
+ggplot(bioChemists, aes(x = art)) +
+  geom_histogram(binwidth = 1, color = "white") +
+  labs(x = "Number of articles within 3y of graduation")
+```
+
+-   Since the outcome data are counts, the most common distribution assumption to make is that the outcome has a Poisson distribution.
+
+-   This chapter will use these data for several types of analyses.
+
+## 21.2 COMPARISONS WITH TWO-SAMPLE TESTS
+
+-   We can start with hypothesis testing.
+
+-   The original author’s goal with this data set on biochemistry publication data was to determine if there is a difference in publications between men and women (Long 1992).
+
+-   The data from the study show:
+
+```{r}
+#| label: number of men and women in the data set and number of publications per gender
+
+bioChemists |> 
+  group_by(fem) |> 
+  summarize(counts = sum(art), n = length(art))
+```
+
+-   There were many more publications by men, although there were also more men in the data.
+
+-   The simplest approach to analyzing these data would be to do a two-sample comparison using the `poisson.test()` function in the **stats** package.
+
+-   It requires the counts for one or two groups.
+
+-   For our application, the hypotheses to compare the two sexes are:
+
+$$
+\begin{align*}H_0 &: \lambda_m = \lambda_f \\H_a &: \lambda_m \neq \lambda_f\end{align*}
+$$
+
+-   where the $λ$ values are the rates of publications (over the same time period).
+
+-   A basic application of the test is:
+
+```{r}
+#| label: Comparison of Poisson rates
+
+poisson.test(c(930, 619), T = 3)
+```
+
+-   The function reports a p-value as well as a confidence interval for the ratio of the publication rates.
+
+-   The results indicate that the observed difference is greater than the experiential noise and favors $H_a$.
+
+-   One issue with using this function is that the results come back as an `htest` object.
+
+-   While this type of object has a well-defined structure, it can be difficult to consume for subsequent operations such as reporting or visualizations.
+
+-   The most impactful tool that tidymodels offers for inferential models is the `tidy()` functions in the **`broom`** package.
+
+-   As previously seen, this function makes a well-formed, predictably named tibble from the object.
+
+-   We can `tidy()` the results of our two-sample comparison test:
+
+```{r}
+#| label: tidying the results of Poisson test
+
+poisson.test(c(930, 619)) |> 
+  tidy()
+```
+
+-   Between the `broom` and `broom.mixed` packages, there are `tidy()` methods for more than 150 models.
+
+-   While the Poisson distribution is reasonable, we might also want to assess using fewer distributional assumptions.
+
+-   Two methods that might be helpful are the bootstrap and permutation tests (Davison and Hinkley 1997).
+
+    The **`infer`** package, part of the tidymodels framework, is a powerful and intuitive tool for hypothesis testing (Ismay and Kim 2021).
+
+-   Its syntax is concise and designed for nonstatisticians.
+
+    First, we `specify()` that we will use the difference in the mean number of articles between the sexes and then `calculate()` the statistic from the data.
+
+-   Recall that the maximum likelihood estimator for the Poisson mean is the sample mean.
+
+-   The hypotheses tested here are the same as the previous test (but are conducted using a different testing procedure).
+
+-   With**`infer`**, we specify the outcome and covariate, then state the statistic of interest:
+
+```{r}
+#| label: load necessary packages
+
+library(infer)
+```
+
+```{r}
+#| label: specifying the difference in the mean number of articles between sexes and calculating the statistic from the data
+
+observed <- 
+  bioChemists |> 
+  specify(art ~ fem) |> 
+  calculate(stat = "diff in means", order = c("Men", "Women"))
+
+observed
+```
+
+-   From here, we compute a confidence interval for this mean by creating the bootstrap distribution via `generate()`;
+
+    -   the same statistic is computed for each resampled version of the data:
+
+```{r}
+#| label: computing a confidence interval for this mean by creating the bootstrap distribution
+
+set.seed(2101)
+bootstrapped <- 
+  bioChemists |> 
+  specify(art ~ fem) |> 
+  generate(reps = 2000, type = "bootstrap") |> 
+  calculate(stat = "diff in means", order = c("Men", "Women"))
+
+bootstrapped
+```
