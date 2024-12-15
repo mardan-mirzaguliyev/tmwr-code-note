@@ -194,3 +194,72 @@ bootstrapped <-
 
 bootstrapped
 ```
+
+-   A percentile interval is calculated using:
+
+```{r}
+#| label: calculating the percentile interval
+
+percentile_ci <- get_ci(bootstrapped)
+percentile_ci
+```
+
+-   The **`infer`** package has a high-level API for showing the analysis results, as shown in Figure 21.2.
+
+```{r}
+#| label: visualizing the analysis results which used bootstrap method to assess distributional assumptions
+
+visualize(bootstrapped) +
+  shade_confidence_interval(endpoints = percentile_ci)
+```
+
+-   Since the interval visualized in in Figure 21.2 does not include zero, these results indicate that men have published more articles than women.
+
+-   If we require a p-value, the **`infer`** package can compute the value via a permutation test, shown in the following code.
+
+-   The syntax is very similar to the bootstrapping code we used earlier.
+
+-   We add a `hypothesize()` verb to state the type of assumption to test and the `generate()` call contains an option to shuffle the data.
+
+```{r}
+#| label: stating the type of assumption to test and shuffling the data
+
+set.seed(2102)
+
+permuted <- 
+  bioChemists |> 
+  specify(art ~ fem) |> 
+  hypothesize(null = "independence") |> 
+  generate(reps = 2000, type = "permute") |> 
+  calculate(stat = "diff in means", order = c("Men", "Women"))
+
+permuted
+```
+
+-   The following visualization code is also very similar to the bootstrap approach.
+
+-   This code generates Figure 21.3 where the vertical line signifies the observed value:
+
+```{r}
+#| label: visualizing the analysis results which used permutation method to assess distributional assumptions
+
+visualize(permuted) +
+  shade_p_value(obs_stat = observed, direction = "two-sided")
+```
+
+-   The actual p-value is:
+
+```{r}
+#| label: p-value for the permutation method
+
+permuted |> 
+  get_p_value(obs_stat = observed, direction = "two-sided")
+```
+
+-   The vertical line representing the null hypothesis in Figure 21.3 is far away from the permutation distribution.
+
+-   This means, if in fact the null hypothesis were true, the likelihood is exceedingly small of observing data at least as extreme as what is at hand.
+
+    The two-sample tests shown in this section are probably suboptimal because they do not account for other factors that might explain the observed relationship between publication rate and sex.
+
+-   Let’s move to a more complex model that can consider additional covariates.
