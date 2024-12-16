@@ -263,3 +263,113 @@ permuted |>
     The two-sample tests shown in this section are probably suboptimal because they do not account for other factors that might explain the observed relationship between publication rate and sex.
 
 -   Let’s move to a more complex model that can consider additional covariates.
+
+## 21.3 LOG-LINEAR MODELS
+
+-   The focus of the rest of this chapter will be on a generalized linear model (Dobson 1999) where we assume the counts follow a Poisson distribution.
+
+-   For this model, the covariates/predictors enter the model in a log-linear fashion:
+
+$$\log(\lambda) = \beta_0 + \beta_1x_1 + \ldots + \beta_px_p$$
+
+-   Let’s fit a simple model that contains all of the predictor columns.
+
+-   The **`poissonreg`** package, a **`parsnip`** extension package in `tidymodels`, will fit this model specification:
+
+```{r}
+#| label: load necessary packages
+
+library(poissonreg)
+```
+
+```{r}
+#| label: fitting the model
+
+# default engine is 'glm'
+log_lin_spec <- poisson_reg()
+
+log_lin_fit <- 
+  log_lin_spec |> 
+  fit(art ~ ., data = bioChemists)
+
+log_lin_fit
+```
+
+-   The `tidy()` method succinctly summarizes the coefficients for the model (along with 90% confidence intervals):
+
+```{r}
+#| label: summarizing the coefficients
+
+tidy(log_lin_fit, conf.int = TRUE, conf.level = 0.90)
+```
+
+-   In this output, the p-values correspond to separate hypothesis tests for each parameter:
+
+$$
+\begin{align*}H_0 &: \beta_j = 0 \\H_a &: \beta_j \neq 0\end{align*}
+$$
+
+-   for each of the model parameters.
+
+-   Looking at these results, phd (the prestige of their department) may not have any relationship with the outcome.
+
+-   While the Poisson distribution is the routine assumption for data like these, it may be beneficial to conduct a rough check of the model assumptions by fitting the models without using the Poisson likelihood to calculate the confidence intervals.
+
+-   The **`rsample`** package has a convenience function to compute bootstrap confidence intervals for `lm()` and `glm()` models.
+
+-   We can use this function, while explicitly declaring `family = poisson`, to compute a large number of model fits.
+
+-   By default, we compute a 90% confidence bootstrap-t interval (percentile intervals are also available):
+
+```{r}
+#| label: computing bootstrap confidence intervals
+
+set.seed(2103)
+
+glm_boot <- 
+  reg_intervals(art ~., 
+                data = bioChemists, 
+                model_fn = "glm",
+                family = poisson)
+
+glm_boot
+```
+
+-   When we compare these results (in Figure 21.4) to the purely parametric results from `glm()`, the bootstrap intervals are somewhat wider.
+
+-   If the data were truly Poisson, these intervals would have more similar widths.
+
+![](images/Screenshot 2024-12-16 at 23.53.35.png){width="352"}
+
+-   Determining which predictors to include in the model is a difficult problem. One approach is to conduct likelihood ratio tests (LRT) (McCullagh and Nelder 1989) between nested models.
+
+-   Based on the confidence intervals, we have evidence that a simpler model without `phd` may be sufficient.
+
+-   Let’s fit a smaller model, then conduct a statistical test:
+
+$$
+\begin{align*}H_0 &: \beta_{\text{phd}} = 0 \\H_a &: \beta_{\text{phd}} \neq 0\end{align*}
+$$
+
+-   This hypothesis was previously tested when we showed the tidied results for `log_lin_fit`.
+
+-   That particular approach used results from a single model fit via a Wald statistic (i.e., the parameter divided by its standard error).
+
+-   For that approach, the p-value was 0.63. We can tidy the results for the LRT to get the p-value:
+
+```{r}
+#| label: tidy the results for the likelihood ratio tests to get the p-value
+
+log_lin_reduced <- 
+  log_lin_spec |> 
+  fit(art ~ ment + kid5 + fem + mar, data = bioChemists)
+
+anova(
+  extract_fit_engine(log_lin_reduced),
+  extract_fit_engine(log_lin_fit),
+  test = "LRT"
+  ) |> 
+  tidy()
+```
+
+-   The results are the same and, based on these and the confidence interval for this parameter, we’ll exclude `phd` from further analyses since it does not appear to be associated with the outcome.
