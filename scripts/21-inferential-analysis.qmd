@@ -339,7 +339,7 @@ glm_boot
 
 -   If the data were truly Poisson, these intervals would have more similar widths.
 
-![](images/Screenshot 2024-12-16 at 23.53.35.png){width="352"}
+![](images/Screenshot%202024-12-16%20at%2023.53.35.png){width="352"}
 
 -   Determining which predictors to include in the model is a difficult problem. One approach is to conduct likelihood ratio tests (LRT) (McCullagh and Nelder 1989) between nested models.
 
@@ -373,3 +373,136 @@ anova(
 ```
 
 -   The results are the same and, based on these and the confidence interval for this parameter, we’ll exclude `phd` from further analyses since it does not appear to be associated with the outcome.
+
+## 21.4 A MORE COMPLEX MODEL
+
+-   We can move into even more complex models within our `tidymodels` approach.
+
+-   For count data, there are occasions where the number of zero counts is larger than what a simple Poisson distribution would prescribe.
+
+-   A more complex model appropriate for this situation is the zero-inflated Poisson (ZIP) model; see Mullahy (1986), Lambert (1992), and Zeileis, Kleiber, and Jackman (2008).
+
+-   Here, there are two sets of covariates: one for the count data and others that affect the probability (denoted as π) of zeros.
+
+-   The equation for the mean λ is:
+
+$$
+\lambda = 0 \pi + (1 - \pi) \lambda_{nz}
+$$
+
+where
+
+$$
+\begin{align*}\log(\lambda_{nz}) &= \beta_0 + \beta_1x_1 + \ldots + \beta_p x_p \\\log\left(\frac{\pi}{1-\pi}\right) &= \gamma_0 + \gamma_1z_1 + \ldots + \gamma_q z_q\end{align*}
+$$
+
+-    and the $x$ covariates affect the count values while the $z$ covariates influence the probability of a zero.
+
+-   The two sets of predictors do not need to be mutually exclusive.
+
+-   We’ll fit a model with a full set of $z$ covariates:
+
+```{r}
+#| label: fittig the model with a full set of z covariates
+
+zero_inflated_spec <- poisson_reg() |> set_engine("zeroinfl")
+
+zero_inflated_fit <- 
+  zero_inflated_spec |> 
+  fit(art ~ fem + mar + kid5 + ment | fem + mar + kid5 + phd + ment,
+      data = bioChemists)
+
+zero_inflated_fit
+```
+
+-   Since the coefficients for this model are also estimated using maximum likelihood, let’s try to use another likelihood ratio test to understand if the new model terms are helpful.
+
+-   We will *simultaneously* test that:
+
+$$
+\begin{align*}H_0 &: \gamma_1 = 0, \gamma_2 = 0, \ldots, \gamma_5 = 0 \\H_a &: \text{at least one } \gamma \neq 0\end{align*}
+$$
+
+-   Let’s try ANOVA again:
+
+```{r}
+#| label: apply anova to simultaneously test if the new model terms are helpful
+
+# anova(
+#   extract_fit_engine(zero_inflated_fit),
+#   extract_fit_engine(log_lin_reduced),
+#   test = "LRT"
+#   ) |> 
+#   tidy()
+
+## Error in UseMethod("anova") : 
+##  no applicable method for 'anova' applied to an object of class "zeroinfl"
+```
+
+-   An `anova()` method isn’t implemented for `zeroinfl` objects!
+
+-   An alternative is to use an *information criterion statistic*, such as the Akaike information criterion (AIC) (Claeskens 2016).
+
+-   This computes the log-likelihood (from the training set) and penalizes that value based on the training set size and the number of model parameters.
+
+-   In R’s parameterization, smaller AIC values are better. In this case, we are not conducting a formal statistical test but *estimating* the ability of the data to fit the data.
+
+-   The results indicate that the ZIP model is preferable:
+
+```{r}
+#| label: comparing two models to estimate the ability of the data to fit the data
+
+zero_inflated_fit |> extract_fit_engine() |> AIC()
+
+log_lin_reduced |> extract_fit_engine() |> AIC()
+```
+
+-   However, it’s hard to contextualize this pair of single values and assess *how* different they actually are.
+
+-   To solve this problem, we’ll resample a large number of each of these two models.
+
+-   From these, we can compute the AIC values for each and determine how often the results favor the ZIP model.
+
+-   Basically, we will be characterizing the uncertainty of the AIC statistics to gauge their difference relative to the noise in the data.
+
+-   We’ll also compute more bootstrap confidence intervals for the parameters in a bit so we specify the `apparent = TRUE` option when creating the bootstrap samples. This is required for some types of intervals.
+
+-   First, we create the 4,000 model fits:
+
+```{r}
+#| label: creating 2000 model fits for each method
+
+zip_form <- art ~ fem + mar + kid5 + ment | fem + mar + kid5 + phd + ment
+glm_form <- art ~ fem + mar + kid5 + ment
+
+set.seed(2104)
+bootstrap_models <- 
+  bootstraps(bioChemists, times = 2000, apparent = TRUE) |> 
+  mutate(
+    glm = map(splits, ~ fit(log_lin_spec, glm_form, data = analysis(.x))),
+    zip = map(splits, ~ fit(zero_inflated_spec, zip_form, data = analysis(.x)))
+  )
+
+bootstrap_models
+```
+
+-   Now we can extract the model fits and their corresponding AIC values:
+
+```{r}
+#| label: extracting the model fits and their corresponding AIC values
+
+bootstrap_models <-
+  bootstrap_models |> 
+  mutate(
+    glm_aic = map_dbl(glm, ~ extract_fit_engine(.x) |> AIC()),
+    zip_aic = map_dbl(zip, ~ extract_fit_engine(.x) |> AIC())
+  )
+
+mean(bootstrap_models$zip_aic < bootstrap_models$glm_aic)
+```
+
+-   It seems definitive from these results that accounting for the excessive number of zero counts is a good idea.
+
+-   We could have used `fit_resamples()` or a workflow set to conduct these computations.
+
+-   In this section, we used `mutate()` and `map()` to compute the models to demonstrate how one might use `tidymodels` tools for models that are not supported by one of the **`parsnip`** packages.
