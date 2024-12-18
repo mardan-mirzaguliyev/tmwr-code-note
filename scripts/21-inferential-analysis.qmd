@@ -396,7 +396,7 @@ $$
 \begin{align*}\log(\lambda_{nz}) &= \beta_0 + \beta_1x_1 + \ldots + \beta_p x_p \\\log\left(\frac{\pi}{1-\pi}\right) &= \gamma_0 + \gamma_1z_1 + \ldots + \gamma_q z_q\end{align*}
 $$
 
--    and the $x$ covariates affect the count values while the $z$ covariates influence the probability of a zero.
+-   and the $x$ covariates affect the count values while the $z$ covariates influence the probability of a zero.
 
 -   The two sets of predictors do not need to be mutually exclusive.
 
@@ -506,3 +506,74 @@ mean(bootstrap_models$zip_aic < bootstrap_models$glm_aic)
 -   We could have used `fit_resamples()` or a workflow set to conduct these computations.
 
 -   In this section, we used `mutate()` and `map()` to compute the models to demonstrate how one might use `tidymodels` tools for models that are not supported by one of the **`parsnip`** packages.
+
+-   Since we have computed the resampled model fits, let’s create bootstrap intervals for the zero probability model coefficients (i.e., \\gamma_j).
+
+-   We can extract these with the `tidy()` method and use the `type = "zero"` option to obtain these estimates:
+
+```{r}
+#| label: extracting the zero probability model coefficients
+
+bootstrap_models <- 
+  bootstrap_models |> 
+  mutate(zero_coefs = map(zip, ~ tidy(.x, type = "zero")))
+
+bootstrap_models
+```
+
+```{r}
+#| label: one example of the zero probability model coefficients
+
+bootstrap_models$zero_coefs[[1]]
+```
+
+-   It’s a good idea to visualize the bootstrap distributions of the coefficients, as in Figure 21.5.
+
+```{r}
+#| label: visualizing the bootstrap distributions of the coefficients
+
+bootstrap_models |> 
+  unnest(zero_coefs) |> 
+  ggplot(aes(x = estimate)) +
+  geom_histogram(bins = 25, color = "white") +
+  facet_wrap(~ term, scales = "free_x") +
+  geom_vline(xintercept = 0, lty = 2, color = "gray70")
+```
+
+-   One of the covariates (`ment`) that appears to be important has a very skewed distribution. The extra space in some of the facets indicates there are some outliers in the estimates.
+
+-   This *might* occur when models did not converge; those results probably should be excluded from the resamples.
+
+-   For the results visualized in Figure 21.5, the outliers are due only to extreme parameter estimates; all of the models converged.
+
+-   The **`rsample`** package contains a set of functions named `int_*()` that compute different types of bootstrap intervals.
+
+-   Since the `tidy()` method contains standard error estimates, the bootstrap-t intervals can be computed.
+
+-   We’ll also compute the standard percentile intervals. By default, 90% confidence intervals are computed.
+
+```{r}
+#| label: computing the standard percentile intervals
+
+bootstrap_models |> int_pctl(zero_coefs)
+```
+
+```{r}
+#| label: computing the bootstrap-t intervals
+
+bootstrap_models |> int_t(zero_coefs)
+```
+
+## 21.5 MORE INFERENTIAL ANALYSIS
+
+-   This chapter demonstrated just a small subset of what is available for inferential analysis in tidymodels and has focused on resampling and frequentist methods.
+
+-   rguably, Bayesian analysis is a very effective and often superior approach for inference.
+
+-   A variety of Bayesian models are available via **`parsnip`**.
+
+-   Additionally, the **`multilevelmod`** package enables users to fit hierarchical Bayesian and non-Bayesian models (e.g., mixed models).
+
+-   The **`broom.mixed`** and **`tidybayes`** packages are excellent tools for extracting data for plots and summaries.
+
+-   Finally, for data sets with a single hierarchy, such as simple longitudinal or repeated measures data, **rsample**’s `group_vfold_cv()` function facilitates straightforward out-of-sample characterizations of model performance.
